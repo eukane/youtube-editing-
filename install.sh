@@ -151,12 +151,15 @@ fi
 
 echo "[5/5] 실행 명령 등록"
 BIN="$PREFIX/bin/편집기"
+# 잠금 해제 명령은 termux-wake-unlock 이다. wake-lock 쪽에 해제 옵션을 붙여
+# 부르면 사용법 안내가 stdout 으로 나와서, 편집기를 끌 때마다 엉뚱한 문구가
+# 뜬다. 아래 실행 파일에는 정확한 명령만 넣는다.
 cat > "$BIN" <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
 # 폰에서 편집기를 켜는 명령
 cd "$TARGET" || exit 1
-termux-wake-lock 2>/dev/null || true
-trap 'termux-wake-lock -u 2>/dev/null || termux-wake-unlock 2>/dev/null || true' EXIT
+termux-wake-lock >/dev/null 2>&1 || true
+trap 'termux-wake-unlock >/dev/null 2>&1 || true' EXIT
 python -m gameedit serve --local --profile phone "\$@"
 EOF
 chmod +x "$BIN"

@@ -137,6 +137,9 @@ def test_installer_creates_launch_command(termux):
     body = launcher.read_text()
     assert "--local" in body and "--profile phone" in body
     assert "termux-wake-lock" in body        # 편집 중 잠들지 않게
+    # 해제는 termux-wake-unlock. -u 로 부르면 끌 때마다 사용법이 출력된다.
+    assert "termux-wake-unlock" in body
+    assert "termux-wake-lock -u" not in body
     assert str(ROOT) in body                 # 저장소 위치를 기억한다
 
     # 'update' 한 단어로 최신 버전을 받을 수 있어야 한다
