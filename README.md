@@ -118,34 +118,52 @@ gameedit auto 풀영상.mp4 --no-subtitles
 
 ## 밈
 
-기본 팩(`assets/memepacks/default/pack.yaml`)에는 저작권 걱정 없는 **텍스트 밈** 17종이
-들어 있습니다. 대사에 "죽었" 이 나오면 `☠️ 또 죽었습니다`, "이겼" 이 나오면
-`🏆 캐 리 시 작` 같은 식입니다.
+기본 팩에 밈 **28종의 트리거가 이미 정의**돼 있습니다. 대사에 "죽었" 이 나오면
+`☠️ 또 죽었습니다`, "빡쳐" 가 나오면 `😤 킹 받 네`, 소리를 지르면 `🔥 여기가 하이라이트`.
 
-이미지·움짤·효과음을 쓰려면 팩 폴더에 파일을 넣고 `pack.yaml` 에 등록하면 됩니다.
+각 밈에는 **그림·효과음 파일 자리가 미리 잡혀 있어서**, 파일이 없으면 자막 밈으로
+나가다가 파일을 넣는 순간 그림·소리로 자동 승격됩니다. 트리거를 다시 짤 필요가 없습니다.
+
+```bash
+gameedit packs            # 지금 어떤 밈이 어떤 말에 반응하는지
+gameedit packs --missing  # 어떤 파일을 어디에 넣으면 되는지
+```
+
+### 내 밈 소스 넣는 3가지 방법
+
+```bash
+# 1) 기본 팩의 빈자리 채우기 — 파일명만 맞춰 복사
+cp 무야호.png assets/memepacks/default/images/무야호.png
+cp 웃음.mp3  assets/memepacks/default/sfx/웃음.mp3
+
+# 2) 모아둔 폴더 통째로 — 파일 이름이 곧 트리거
+#    gameedit.yaml 에  memes: { asset_dirs: ["D:/내밈모음"] }
+#      무야호.png                → "무야호" 라고 말하면 뜸
+#      무야호.mp3                → 같은 이름이면 위 그림의 효과음으로 자동 결합
+#      죽었,사망,뒤졌.png         → 쉼표로 트리거 여러 개
+#      개킹받네@right@2.5.png    → @위치 @노출시간
+#      hype@_.mp3                → 대사 대신 상황(hype/silence/timeskip)으로 발동
+
+# 3) 하나씩 정확하게 등록
+gameedit add-meme ~/짤/관짝.gif -t 죽었 -t 사망 --placement center --duration 2.5
+gameedit add-meme ~/효과음/두둥.mp3 -e hype
+```
+
 자세한 형식은 [`assets/memepacks/README.md`](assets/memepacks/README.md) 참고.
+
+밈이 도배되지 않도록 세 가지 안전장치가 걸려 있습니다.
+**분당 개수 제한**, **밈별 쿨다운**, **최소 간격**. 자리가 겹치면 대사에서 나온 밈과
+직접 넣은 밈이 자동 리액션 밈보다 우선합니다.
+
+### 전환 카드
+
+클립 사이에 원본 시간이 크게 벌어지면(기본 90초) 화면 가운데에
+`3분 후` 같은 **시간 경과 카드**가 자동으로 들어갑니다. 편집본만 보는 시청자가
+갑자기 상황이 바뀐 걸 헷갈리지 않게 해주는 연출입니다.
 
 ```yaml
 memes:
-  - id: my_reaction
-    kind: image            # text | image | video | audio
-    asset: images/reaction.png
-    sfx: sfx/boom.mp3
-    triggers: ["대박", "미쳤"]
-    events: [hype]         # 대사가 없어도 소리 지르는 순간에 발동
-    placement: right
-    duration: 2.0
-    cooldown: 30           # 같은 밈 재등장 최소 간격
-```
-
-밈이 도배되지 않도록 세 가지 안전장치가 걸려 있습니다.
-**분당 개수 제한**, **밈별 쿨다운**, **최소 간격**. 자리가 겹치면 대사에서 나온 밈이
-자동 리액션 밈보다 우선합니다.
-
-현재 밈 목록 확인:
-
-```bash
-gameedit packs
+  timeskip_min: 90     # 0 이면 끄기
 ```
 
 ## 하이라이트는 어떻게 고르나
@@ -196,6 +214,8 @@ gameedit init        # gameedit.yaml 생성 (모든 기본값이 들어 있습�
 | `subtitles.emphasis_threshold` | 0.72 | 이 이상 흥분한 구간의 대사는 강조 |
 | `memes.max_per_minute` | 4 | 분당 밈 개수 상한 |
 | `memes.packs` | `[default]` | 사용할 밈 팩 |
+| `memes.asset_dirs` | `[]` | 파일명이 곧 트리거가 되는 밈 폴더 |
+| `memes.timeskip_min` | 90 | 클립 사이가 이만큼 벌어지면 "N분 후" 카드 |
 | `render.punch_zoom` | true | 피크 구간 줌 인 |
 | `render.crf` / `preset` | 20 / medium | 화질·인코딩 속도 |
 | `project.resolution` | (원본 유지) | 예: `1920x1080`, 쇼츠면 `1080x1920` |
@@ -215,7 +235,8 @@ gameedit plan --set memes.max_per_minute=6 --set highlight.weights.audio=1.5
 | `gameedit plan` | 편집 계획 + 검수 리포트 생성 |
 | `gameedit preview` | `plan.json` 으로 검수 HTML 다시 생성 |
 | `gameedit render` | 계획대로 렌더링. `--dry-run` 이면 ffmpeg 명령만 출력 |
-| `gameedit packs` | 사용 중인 밈 목록 |
+| `gameedit packs` | 사용 중인 밈 목록 (`--missing` 이면 넣을 파일 경로) |
+| `gameedit add-meme <파일>` | 그림·움짤·효과음을 밈으로 등록 |
 | `gameedit doctor` | ffmpeg·음성인식·폰트 설치 점검 |
 | `gameedit init` | 설정 파일 생성 |
 
@@ -270,7 +291,8 @@ libass 로 굽습니다. ffmpeg 빌드에 `drawtext`(libfreetype)가 없어도 �
 
 ## 알아두면 좋은 것
 
-- 밈 이미지·효과음의 저작권은 직접 확인해 주세요. 기본 팩은 텍스트만 씁니다.
+- 밈 소스의 사용 범위는 각 원작자·플랫폼 정책을 따릅니다. 저장소에 동봉된 것은
+  텍스트 문구뿐이고, 그림·효과음 파일은 직접 넣는 구조입니다.
 - 음성 인식은 완벽하지 않습니다. 게임 용어·고유명사는 `plan.json` 에서 고치는 게 빠릅니다.
 - 최종 판단은 사람이 합니다. 이 도구는 긴 영상에서 "볼 만한 부분"을 찾아
   1차 편집본까지 만들어 주는 것까지가 역할입니다.

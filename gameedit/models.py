@@ -188,6 +188,7 @@ class MemeCue:
     sfx_volume: float = 0.9
     trigger: str = ""
     source_start: float = 0.0
+    show_text: bool = True  # 자막 레이어에 text 를 그릴지 (그림 밈 위에 글자를 얹을 때 사용)
     priority: float = 1.0  # 자리 다툼이 날 때 높은 쪽이 살아남는다
     cooldown: float = 0.0  # 이 밈이 다시 나오기까지 최소 간격(초)
 

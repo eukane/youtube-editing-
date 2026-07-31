@@ -18,7 +18,8 @@ def build_plan(analysis: Analysis, config: Config) -> EditPlan:
     plan.relayout()
 
     meme_cfg = config.section("memes")
-    memes = load_packs(meme_cfg.get("packs", []), meme_cfg.get("pack_dirs", []))
+    memes = load_packs(meme_cfg.get("packs", []), meme_cfg.get("pack_dirs", []),
+                       asset_dirs=meme_cfg.get("asset_dirs", []))
     plan.memes = plan_memes(plan, analysis, memes, meme_cfg)
     plan.subtitles = build_subtitle_cues(plan, analysis, config.section("subtitles"))
 

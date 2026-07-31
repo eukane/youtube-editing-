@@ -156,6 +156,9 @@ def build_dress_command(plan: EditPlan, cfg: dict, source: Path, ass_path: Path 
     for cue in visual:
         if cue.kind == "image":
             cmd += ["-loop", "1", "-t", f"{cue.duration:.3f}", "-i", cue.asset]
+        elif cue.asset.lower().endswith(".gif"):
+            # 움짤은 노출 시간 동안 계속 돌아야 한다
+            cmd += ["-ignore_loop", "0", "-t", f"{cue.duration:.3f}", "-i", cue.asset]
         else:
             cmd += ["-i", cue.asset]
         visual_inputs.append((index, cue))

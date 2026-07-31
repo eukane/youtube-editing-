@@ -11,7 +11,8 @@ from . import __version__
 from .analyze import analyze_video
 from .config import Config
 from .media import FFmpegError, find_binary, format_timecode
-from .memes import BUILTIN_PACK_DIR, load_packs, missing_assets
+from .memes import (AUDIO_EXTS, BUILTIN_PACK_DIR, IMAGE_EXTS, VIDEO_EXTS, load_packs,
+                    missing_assets)
 from .models import Analysis, EditPlan, analysis_from_dict, load_json, save_json
 from .plan import build_plan, load_plan
 from .render import render
@@ -334,14 +335,92 @@ def cmd_auto(args) -> int:
 def cmd_packs(args) -> int:
     config = load_config(args)
     meme_cfg = config.section("memes")
-    memes = load_packs(meme_cfg.get("packs", ["default"]), meme_cfg.get("pack_dirs", []))
-    log(f"밈 {len(memes)}개")
+    memes = load_packs(meme_cfg.get("packs", ["default"]), meme_cfg.get("pack_dirs", []),
+                       asset_dirs=meme_cfg.get("asset_dirs", []))
+    with_file = [m for m in memes if m.resolved_asset() or m.resolved_sfx()]
+    log(f"밈 {len(memes)}개 (그림·소리 파일이 붙은 밈 {len(with_file)}개)")
+    log("")
     for meme in memes:
-        triggers = ", ".join(meme.triggers[:6]) or (", ".join(meme.events) or "-")
-        asset = meme.resolved_asset()
-        mark = "" if meme.kind == "text" else (" ✓" if asset else " ✗파일없음")
-        log(f"  [{meme.kind:5s}]{mark} {meme.id:16s} {meme.text or Path(meme.asset).name:20s} ← {triggers}")
+        triggers = ", ".join(meme.triggers[:5]) or (", ".join(meme.events) or "-")
+        has_image = meme.resolved_asset() is not None
+        has_sfx = meme.resolved_sfx() is not None
+        if has_image:
+            mark = "🖼 "
+        elif has_sfx:
+            mark = "🔊"
+        else:
+            mark = "💬"
+        label = meme.text or Path(meme.asset).stem
+        log(f"  {mark} {meme.id:15s} {label:22s} ← {triggers}")
+        if args.missing and not has_image and meme.asset:
+            log(f"       └ 넣을 파일: {Path(meme.base_dir or '.') / meme.asset}"
+                + (f" · {Path(meme.base_dir or '.') / meme.sfx}" if meme.sfx and not has_sfx else ""))
+    if not args.missing:
+        log("\n(💬=자막으로 나감 · 🖼=그림 있음 · 🔊=효과음 있음."
+            " `gameedit packs --missing` 으로 넣을 파일 경로를 볼 수 있습니다)")
     return 0
+
+
+def cmd_add_meme(args) -> int:
+    """이미지·효과음 파일 하나를 밈 팩에 등록한다."""
+    source = Path(args.file)
+    if not source.exists():
+        raise SystemExit(f"파일이 없습니다: {source}")
+
+    pack_dir = Path(args.pack) if args.pack else BUILTIN_PACK_DIR / "default"
+    pack_file = pack_dir / "pack.yaml"
+    if not pack_file.exists():
+        raise SystemExit(f"밈 팩을 찾을 수 없습니다: {pack_file}\n"
+                         f"`--pack <폴더>` 로 지정하거나 pack.yaml 을 먼저 만드세요.")
+
+    suffix = source.suffix.lower()
+    if suffix in AUDIO_EXTS:
+        kind, subdir, field = "audio", "sfx", "sfx"
+    elif suffix in VIDEO_EXTS:
+        kind, subdir, field = "video", "images", "asset"
+    elif suffix in IMAGE_EXTS:
+        kind, subdir, field = "image", "images", "asset"
+    else:
+        raise SystemExit(f"지원하지 않는 파일 형식입니다: {suffix}")
+
+    target_dir = pack_dir / subdir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / source.name
+    if source.resolve() != target.resolve():
+        target.write_bytes(source.read_bytes())
+
+    meme_id = args.id or source.stem
+    triggers = [t for t in (args.trigger or []) if t]
+    events = [e for e in (args.event or []) if e]
+    if not triggers and not events:
+        triggers = [source.stem]
+
+    entry = [
+        "",
+        f"  - id: {meme_id}",
+        f"    kind: {kind}",
+        f"    {field}: {subdir}/{source.name}",
+        f"    triggers: [{', '.join(_yaml_quote(t) for t in triggers)}]",
+    ]
+    if events:
+        entry.append(f"    events: [{', '.join(events)}]")
+    entry += [
+        f"    placement: {args.placement}",
+        f"    duration: {args.duration}",
+        f"    weight: {args.weight}",
+        f"    cooldown: {args.cooldown}",
+    ]
+    with pack_file.open("a", encoding="utf-8") as fp:
+        fp.write("\n".join(entry) + "\n")
+
+    log(f"등록 완료: {target}")
+    log(f"  id={meme_id} · 트리거: {', '.join(triggers + events)}")
+    log(f"  정의 추가됨 → {pack_file}")
+    return 0
+
+
+def _yaml_quote(text: str) -> str:
+    return '"' + str(text).replace('"', '\\"') + '"'
 
 
 # --------------------------------------------------------------------------
@@ -419,8 +498,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_auto)
 
     p = sub.add_parser("packs", help="사용 중인 밈 목록 보기")
+    p.add_argument("--missing", action="store_true",
+                   help="그림·소리 파일이 비어 있는 밈과 넣을 경로를 보여줍니다")
     _add_common(p)
     p.set_defaults(func=cmd_packs)
+
+    p = sub.add_parser("add-meme", help="이미지·움짤·효과음 파일을 밈으로 등록")
+    p.add_argument("file", help="등록할 파일 (png/jpg/gif/mp4/mp3/wav …)")
+    p.add_argument("-t", "--trigger", action="append",
+                   help="이 말이 나오면 발동 (여러 번 지정 가능, 생략 시 파일명)")
+    p.add_argument("-e", "--event", action="append", choices=["hype", "silence", "timeskip"],
+                   help="대사 대신 상황으로 발동")
+    p.add_argument("--id", help="밈 id (기본: 파일명)")
+    p.add_argument("--pack", help="등록할 팩 폴더 (기본: 내장 default 팩)")
+    p.add_argument("--placement", default="top",
+                   choices=["top", "center", "bottom", "left", "right", "fullscreen"])
+    p.add_argument("--duration", type=float, default=2.0, help="노출 시간(초)")
+    p.add_argument("--weight", type=float, default=1.5, help="우선순위")
+    p.add_argument("--cooldown", type=float, default=20.0, help="재등장 최소 간격(초)")
+    _add_common(p)
+    p.set_defaults(func=cmd_add_meme)
 
     return parser
 

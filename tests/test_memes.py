@@ -106,3 +106,111 @@ def test_pack_names_accept_plain_string(tmp_path):
                                         encoding="utf-8")
     assert len(load_packs("default")) >= 10
     assert len(load_packs([], str(tmp_path))) == 1
+
+
+# ---------------------------------------------------------------- 자동 스캔
+
+def test_parse_asset_filename_variants():
+    from gameedit.memes import parse_asset_filename
+
+    assert parse_asset_filename("무야호.png")["triggers"] == ["무야호"]
+    multi = parse_asset_filename("죽었,사망,뒤졌.png")
+    assert multi["triggers"] == ["죽었", "사망", "뒤졌"]
+
+    opts = parse_asset_filename("개킹받네@right@2.5.gif")
+    assert opts["triggers"] == ["개킹받네"]
+    assert opts["placement"] == "right"
+    assert opts["duration"] == 2.5
+
+    ev = parse_asset_filename("hype@_.mp3")
+    assert ev["events"] == ["hype"] and ev["triggers"] == []
+
+
+def _touch(path, data=b"x"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def test_scan_asset_dir_reads_files_as_memes(tmp_path):
+    from gameedit.memes import scan_asset_dir
+
+    _touch(tmp_path / "무야호.png")
+    _touch(tmp_path / "무야호.mp3")          # 같은 이름 → 위 그림의 효과음
+    _touch(tmp_path / "죽었,사망@right@2.5.png")
+    _touch(tmp_path / "silence@_.wav")       # 소리만 있는 밈
+    _touch(tmp_path / "읽지않음.txt")
+
+    memes = {m.id: m for m in scan_asset_dir(tmp_path)}
+    assert set(memes) == {"무야호", "죽었", "silence"}
+
+    assert memes["무야호"].kind == "image"
+    assert memes["무야호"].sfx.endswith("무야호.mp3")     # 그림+소리 자동 짝짓기
+    assert memes["죽었"].triggers == ["죽었", "사망"]
+    assert memes["죽었"].placement == "right"
+    assert memes["죽었"].duration == 2.5
+    assert memes["silence"].kind == "audio"
+    assert memes["silence"].events == ["silence"]
+    assert memes["silence"].sfx.endswith("silence@_.wav")
+
+
+def test_scan_asset_dir_ids_do_not_collide(tmp_path):
+    from gameedit.memes import scan_asset_dir
+
+    _touch(tmp_path / "웃음.png")
+    _touch(tmp_path / "sub" / "웃음.gif")
+    ids = [m.id for m in scan_asset_dir(tmp_path)]
+    assert len(ids) == len(set(ids)) == 2
+
+
+def test_scan_asset_dir_missing_folder():
+    from gameedit.memes import scan_asset_dir
+
+    assert scan_asset_dir("/존재하지/않는/폴더") == []
+
+
+def test_load_packs_includes_scanned_assets(tmp_path):
+    _touch(tmp_path / "대박.png")
+    memes = load_packs(["default"], asset_dirs=[str(tmp_path)])
+    scanned = [m for m in memes if m.id == "대박"]
+    assert scanned and scanned[0].kind == "image"
+    # 직접 넣은 밈이 기본 텍스트 밈보다 우선순위가 높아야 한다
+    assert scanned[0].weight > max(m.weight for m in memes if m.pack == "default")
+
+
+# ---------------------------------------------------------------- 전환 카드
+
+def test_humanize_gap():
+    from gameedit.memes import humanize_gap
+
+    assert humanize_gap(12) == "10초 후"
+    assert humanize_gap(185) == "3분 후"
+    assert humanize_gap(3600) == "1시간 후"
+    assert humanize_gap(7800) == "2시간 후"
+
+
+def test_timeskip_card_between_distant_clips(analysis):
+    cfg = Config()
+    cfg.set("highlight.target_duration", 40)   # 클립이 짧아져 사이가 크게 벌어진다
+    cfg.set("memes.timeskip_min", 20)
+    plan = build_plan(analysis, cfg)
+
+    gaps = [n.source_start - p.source_end for p, n in zip(plan.clips, plan.clips[1:])]
+    assert any(g >= 20 for g in gaps), "테스트 전제: 클립 사이가 벌어져 있어야 한다"
+
+    cards = [c for c in plan.memes if c.trigger == "timeskip"]
+    assert cards, "멀리 떨어진 클립 사이에 전환 카드가 없다"
+    for card in cards:
+        assert card.show_text and card.text.endswith("후")
+        assert card.style == "Card"
+        # 카드가 뜨는 클립에는 라벨을 겹쳐 넣지 않는다
+        labels = [c for c in plan.memes
+                  if c.meme_id == "clip_label" and abs(c.start - card.start) < 1.0]
+        assert not labels
+
+
+def test_timeskip_disabled(analysis):
+    cfg = Config()
+    cfg.set("memes.timeskip_min", 0)
+    plan = build_plan(analysis, cfg)
+    assert not [c for c in plan.memes if c.trigger == "timeskip"]

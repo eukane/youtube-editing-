@@ -1,30 +1,40 @@
 name: default
 description: >
-  기본 자막밈 팩. 저작권 이슈가 없도록 텍스트 밈만 들어 있습니다.
-  이미지/영상/효과음 밈을 쓰려면 이 폴더(또는 새 팩 폴더)에 파일을 넣고
-  kind: image / video / audio 와 asset, sfx 경로를 채우면 됩니다.
+  게임 실황 편집용 기본 밈 팩.
+
+  각 밈은 자막 문구(text)와 함께 이미지·효과음 자리(asset/sfx)를 미리 잡아 뒀습니다.
+  파일이 없으면 자막 밈으로 나가고, 아래 경로에 파일을 넣는 순간 그림·소리로 자동 승격됩니다.
+
+      assets/memepacks/default/images/무야호.png
+      assets/memepacks/default/sfx/무야호.mp3
+
+  파일 이름은 아래 각 밈의 asset / sfx 에 적힌 그대로 맞춰 주세요.
+  (그냥 아무 폴더에 파일을 쏟아붓고 파일명을 트리거로 쓰고 싶다면
+   memes.asset_dirs 설정을 쓰세요. README 참고)
 
 # duration  : 화면에 떠 있는 시간(초)
 # triggers  : 대사에 이 문자열이 들어가면 발동
-# events    : hype(오디오 피크) / silence(정적) 같은 상황 트리거
+# events    : hype(오디오 피크) / silence(정적) / timeskip(시간 점프)
 # cooldown  : 같은 밈이 다시 나오기까지 최소 간격(초)
 # weight    : 여러 밈이 동시에 걸릴 때 우선순위
+# placement : top / center / bottom / left / right (이미지·영상 위치)
 memes:
-  # ---------------- 사망 / 실패 ----------------
+  # ======================= 사망 · 실패 =======================
   - id: death_again
-    kind: text
     text: "☠️ 또 죽었습니다"
-    triggers: ["죽었", "죽네", "죽음", "사망", "뒤졌", "리스폰"]
+    asset: images/사망.png
+    sfx: sfx/사망.mp3
+    triggers: ["죽었", "죽네", "죽음", "사망", "뒤졌", "리스폰", "관짝", "또 죽"]
     placement: top
-    style: MemeTop
     duration: 2.0
     weight: 1.4
     cooldown: 20
 
   - id: gg
-    kind: text
     text: "GG 😇"
-    triggers: ["망했", "망함", "끝났", "졌다", "졌네", "털렸"]
+    asset: images/gg.png
+    sfx: sfx/실패.mp3
+    triggers: ["망했", "망함", "끝났", "졌다", "졌네", "털렸", "나가리", "지디"]
     placement: center
     style: MemeCenter
     duration: 1.6
@@ -32,30 +42,50 @@ memes:
     cooldown: 30
 
   - id: skill_issue
-    kind: text
     text: "( 실 력 문 제 )"
-    triggers: ["실수", "아 진짜", "왜이래", "왜 저래", "손이", "미스"]
+    asset: images/실력문제.png
+    triggers: ["실수", "아 진짜", "왜이래", "왜 저래", "손이", "미스", "삑살", "빗나"]
     placement: top
-    style: MemeTop
     duration: 2.0
     weight: 1.0
     cooldown: 40
 
   - id: ambush
-    kind: text
     text: "🚨 뒤 조 심 🚨"
-    triggers: ["뒤에", "언제 왔", "어디서", "기습", "당했"]
+    asset: images/뒤조심.png
+    sfx: sfx/경보.mp3
+    triggers: ["뒤에", "언제 왔", "어디서", "기습", "당했", "뒤통수"]
     placement: top
-    style: MemeTop
     duration: 1.8
     weight: 1.1
     cooldown: 35
 
-  # ---------------- 성공 / 클리어 ----------------
+  - id: fall
+    text: "🕳️ 낙 사"
+    asset: images/낙사.png
+    sfx: sfx/추락.mp3
+    triggers: ["떨어졌", "낙사", "밑으로", "아래로 떨", "빠졌"]
+    placement: center
+    style: MemeCenter
+    duration: 1.6
+    weight: 1.2
+    cooldown: 40
+
+  - id: nalak
+    text: "📉 나 락 행"
+    asset: images/나락.png
+    triggers: ["나락", "폭망", "역대급 망", "최악", "손절"]
+    placement: top
+    duration: 2.0
+    weight: 1.1
+    cooldown: 60
+
+  # ======================= 성공 · 캐리 =======================
   - id: clutch
-    kind: text
     text: "🏆 캐 리 시 작"
-    triggers: ["이겼", "잡았", "뚫었", "클리어", "성공", "1등", "역전"]
+    asset: images/캐리.png
+    sfx: sfx/승리.mp3
+    triggers: ["이겼", "잡았", "뚫었", "클리어", "성공", "1등", "역전", "캐리"]
     placement: center
     style: MemeCenter
     duration: 1.8
@@ -63,30 +93,49 @@ memes:
     cooldown: 30
 
   - id: pro_gamer
-    kind: text
     text: "프로게이머 무브 🎮"
-    triggers: ["개잘", "잘했", "쩐다", "개쩐", "미쳤다", "지렸"]
+    asset: images/프로게이머.png
+    triggers: ["개잘", "잘했", "쩐다", "개쩐", "미쳤다", "지렸", "폼 미쳤"]
     placement: top
-    style: MemeTop
     duration: 2.0
     weight: 1.2
     cooldown: 35
 
+  - id: muyaho
+    text: "무 야 호 🙌"
+    asset: images/무야호.png
+    sfx: sfx/무야호.mp3
+    triggers: ["신난다", "야호", "무야호", "기분 좋", "가보자"]
+    placement: center
+    style: MemeCenter
+    duration: 2.0
+    weight: 1.3
+    cooldown: 60
+
   - id: survived
-    kind: text
     text: "😮‍💨 살 았 다"
-    triggers: ["살았", "생존", "버텼", "간신히"]
+    asset: images/생존.png
+    triggers: ["살았", "생존", "버텼", "간신히", "겨우"]
     placement: top
-    style: MemeTop
     duration: 1.8
     weight: 1.1
     cooldown: 30
 
-  # ---------------- 리액션 ----------------
+  - id: goat
+    text: "🐐 폼 미 쳤 다"
+    asset: images/goat.png
+    triggers: ["레전드", "역대급", "인생", "최고", "goat"]
+    placement: top
+    duration: 2.0
+    weight: 1.2
+    cooldown: 45
+
+  # ======================= 리액션 =======================
   - id: what
-    kind: text
     text: "??????"
-    triggers: ["뭐야", "이게 뭐", "어떻게", "말도 안", "실화", "어이없"]
+    asset: images/물음표.png
+    sfx: sfx/띠용.mp3
+    triggers: ["뭐야", "이게 뭐", "어떻게", "말도 안", "실화", "어이없", "이게 왜"]
     placement: center
     style: MemeCenter
     duration: 1.4
@@ -94,109 +143,165 @@ memes:
     cooldown: 25
 
   - id: shock
-    kind: text
     text: "😱 헐"
-    triggers: ["헐", "우와", "와씨", "소름", "설마"]
+    asset: images/충격.png
+    sfx: sfx/두둥.mp3
+    triggers: ["헐", "우와", "와씨", "소름", "설마", "미친"]
     placement: top
-    style: MemeTop
     duration: 1.5
     weight: 1.0
     cooldown: 25
 
-  - id: laugh_track
-    kind: text
-    text: "ㅋㅋㅋㅋㅋㅋㅋㅋ"
-    triggers: ["ㅋㅋ", "ㅎㅎ", "웃겨", "하하", "개웃"]
+  - id: king_angry
+    text: "😤 킹 받 네"
+    asset: images/킹받네.png
+    triggers: ["킹받", "빡쳐", "빡친", "짜증", "화나", "열받"]
+    placement: right
+    duration: 2.0
+    weight: 1.3
+    cooldown: 30
+
+  - id: speechless
+    text: "…할 말을 잃음"
+    asset: images/할말없음.png
+    triggers: ["할 말이", "말이 안", "어이가", "기가 막", "어처구니"]
     placement: top
-    style: MemeTop
+    duration: 2.0
+    weight: 1.0
+    cooldown: 50
+
+  - id: laugh_track
+    text: "ㅋㅋㅋㅋㅋㅋㅋㅋ"
+    asset: images/웃음.png
+    sfx: sfx/웃음.mp3
+    triggers: ["ㅋㅋ", "ㅎㅎ", "웃겨", "하하", "개웃", "못참"]
+    placement: top
     duration: 1.6
     weight: 1.3
     cooldown: 20
-    # 이 팩 폴더에 laugh.mp3 를 넣으면 자동으로 효과음까지 나갑니다.
-    sfx: sfx/laugh.mp3
     sfx_volume: 0.7
 
-  - id: hype_peak
-    kind: text
-    text: "🔥 여기가 하이라이트"
-    triggers: []
-    events: [hype]
+  - id: cringe
+    text: "🫠 뇌 절"
+    asset: images/뇌절.png
+    triggers: ["뇌절", "그만해", "재미없", "노잼", "억지"]
     placement: top
-    style: MemeTop
     duration: 1.8
     weight: 1.0
-    cooldown: 45
-    min_excitement: 0.0
-
-  - id: quiet
-    kind: text
-    text: "…🦗"
-    triggers: []
-    events: [silence]
-    placement: center
-    style: MemeCenter
-    duration: 1.4
-    weight: 0.8
     cooldown: 60
 
-  # ---------------- 게임 상황 ----------------
+  # ======================= 게임 상황 =======================
   - id: lag
-    kind: text
     text: "📶 렉 아님 (렉 맞음)"
-    triggers: ["렉", "핑", "버벅", "프레임"]
+    asset: images/렉.png
+    triggers: ["렉", "핑", "버벅", "프레임", "튕겼", "끊기"]
     placement: top
-    style: MemeTop
     duration: 2.0
     weight: 1.0
     cooldown: 60
 
   - id: bug
-    kind: text
     text: "🐛 게임 탓입니다"
-    triggers: ["버그", "이게 왜", "말이 돼", "판정"]
+    asset: images/버그.png
+    triggers: ["버그", "이게 왜 안", "말이 돼", "판정", "핵", "치터"]
     placement: top
-    style: MemeTop
     duration: 2.0
     weight: 1.0
     cooldown: 60
 
   - id: gamble
-    kind: text
     text: "🎲 도박의 시간"
-    triggers: ["뽑기", "가챠", "확률", "천장", "질러"]
+    asset: images/도박.png
+    sfx: sfx/드럼롤.mp3
+    triggers: ["뽑기", "가챠", "확률", "천장", "질러", "뽑아"]
     placement: top
-    style: MemeTop
     duration: 2.0
-    weight: 1.0
+    weight: 1.1
     cooldown: 45
 
   - id: money
-    kind: text
     text: "💸 지갑 오픈"
-    triggers: ["결제", "현질", "샀", "지름", "돈"]
+    asset: images/현질.png
+    sfx: sfx/돈.mp3
+    triggers: ["결제", "현질", "샀", "지름", "돈", "과금"]
     placement: top
-    style: MemeTop
     duration: 1.8
     weight: 0.9
     cooldown: 60
 
-  # ---------------- 시청자 유도 ----------------
+  - id: boss
+    text: "⚔️ 보스전 시작"
+    asset: images/보스.png
+    sfx: sfx/보스등장.mp3
+    triggers: ["보스", "네임드", "레이드", "패턴", "체력바"]
+    placement: top
+    duration: 2.0
+    weight: 1.2
+    cooldown: 90
+
+  - id: item
+    text: "✨ 득 템"
+    asset: images/득템.png
+    sfx: sfx/득템.mp3
+    triggers: ["득템", "먹었", "얻었", "레어", "전설템", "떴다"]
+    placement: right
+    duration: 1.8
+    weight: 1.1
+    cooldown: 40
+
+  - id: troll
+    text: "🃏 팀 운 이 없 다"
+    asset: images/트롤.png
+    triggers: ["트롤", "던지", "팀운", "왜 저기", "팀원이"]
+    placement: top
+    duration: 2.0
+    weight: 1.1
+    cooldown: 45
+
+  # ======================= 편집 연출 =======================
+  - id: hype_peak
+    text: "🔥 여기가 하이라이트"
+    asset: images/하이라이트.png
+    sfx: sfx/하이라이트.mp3
+    triggers: []
+    events: [hype]
+    placement: top
+    duration: 1.8
+    weight: 1.0
+    cooldown: 45
+
+  - id: quiet
+    text: "…🦗"
+    asset: images/정적.png
+    sfx: sfx/귀뚜라미.mp3
+    triggers: []
+    events: [silence]
+    placement: center
+    style: MemeCenter
+    duration: 1.6
+    weight: 0.8
+    cooldown: 60
+
+  # {gap} 자리에 건너뛴 시간이 들어갑니다 (예: "3분 후")
+  - id: timeskip_card
+    text: "{gap}"
+    asset: images/시간경과.png
+    sfx: sfx/전환.mp3
+    triggers: []
+    events: [timeskip]
+    placement: fullscreen
+    style: Card
+    duration: 1.6
+    weight: 1.0
+    cooldown: 0
+
+  # ======================= 시청자 유도 =======================
   - id: subscribe
-    kind: text
     text: "👍 구독 안 하면 다음 판도 짐"
-    triggers: ["구독", "좋아요", "알림"]
+    asset: images/구독.png
+    sfx: sfx/알림.mp3
+    triggers: ["구독", "좋아요", "알림", "댓글"]
     placement: bottom
-    style: MemeTop
     duration: 2.4
     weight: 0.8
     cooldown: 120
-
-# 이미지/효과음 밈 예시 (파일을 넣으면 활성화됩니다)
-#  - id: my_reaction
-#    kind: image
-#    asset: images/reaction.png
-#    sfx: sfx/boom.mp3
-#    triggers: ["대박", "미쳤"]
-#    placement: right
-#    scale: 0.3
-#    duration: 2.0

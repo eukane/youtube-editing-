@@ -188,6 +188,15 @@ def reference_resolution(width: int, height: int, *, base_height: int = 1080) ->
     return ref_w - (ref_w % 2), base_height
 
 
+def _card_style_line(name: str, *, font: str, size: int, primary: str) -> str:
+    """BorderStyle 3 = 글자 뒤에 불투명 박스. 전환 카드용."""
+    # ASS 알파는 00 이 불투명. 40 이면 살짝 비치는 검은 판.
+    return (
+        f"Style: {name},{font},{int(size)},{primary},&H000000FF,&H40000000,&H40000000,"
+        f"-1,0,0,0,100,100,0,0,3,34,0,5,80,80,0,1"
+    )
+
+
 def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
               *, width: int = 1920, height: int = 1080) -> str:
     width, height = reference_resolution(width, height)
@@ -228,6 +237,8 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
         _style_line("MemeCenter", font=font, size=int(size * 1.9), primary="&H003C3CFF",
                     outline_color="&H00FFFFFF", bold=-1, outline=outline + 2, shadow=shadow + 1,
                     align=5, margin_v=0),
+        # 전환 카드("3분 후"): 화면 가운데에 반투명 검은 판 위 흰 글씨
+        _card_style_line("Card", font=font, size=int(size * 1.5), primary="&H00FFFFFF"),
         _style_line("Label", font=font, size=int(size * 0.72), primary="&H00FFFFFF",
                     outline_color="&H00202020", bold=-1, outline=max(1.0, outline - 1), shadow=1,
                     align=7, margin_v=40, margin_l=54),
@@ -253,10 +264,16 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     pop_meme = ("{\\fad(60,180)\\t(0,140,\\fscx120\\fscy120)\\t(140,280,\\fscx100\\fscy100)}"
                 if pop else "{\\fad(60,180)}")
     for cue in meme_cues:
-        if cue.kind != "text" or not cue.text:
+        if not cue.text or not getattr(cue, "show_text", cue.kind == "text"):
             continue
-        style = cue.style if cue.style in ("MemeTop", "MemeCenter", "Label", "Main", "Emph") else "MemeTop"
-        tag = "{\\fad(120,200)}" if style == "Label" else pop_meme
+        style = (cue.style if cue.style in ("MemeTop", "MemeCenter", "Card", "Label", "Main", "Emph")
+                 else "MemeTop")
+        if style == "Label":
+            tag = "{\\fad(120,200)}"
+        elif style == "Card":
+            tag = "{\\fad(180,250)}"
+        else:
+            tag = pop_meme
         text = escape_ass(cue.text)
         events.append((cue.start,
                        f"Dialogue: 1,{_ass_time(cue.start)},{_ass_time(cue.end)},{style},"

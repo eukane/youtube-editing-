@@ -119,3 +119,19 @@ def test_ass_playres_is_normalised_for_small_video():
     text = build_ass([SubtitleCue(start=0, end=1, lines=["테스트"])], [],
                      Config().section("subtitles"), width=640, height=360)
     assert "PlayResX: 1920" in text and "PlayResY: 1080" in text
+
+
+def test_card_style_and_show_text_flag():
+    """그림 밈의 대체 문구는 화면에 안 나가고, 전환 카드 글자는 나가야 한다."""
+    memes = [
+        MemeCue(start=1.0, duration=2.0, meme_id="img", kind="image", asset="a.png",
+                text="대체문구", show_text=False),
+        MemeCue(start=5.0, duration=1.6, meme_id="timeskip_card", kind="image",
+                asset="card.png", text="3분 후", style="Card", show_text=True),
+    ]
+    text = build_ass([], memes, Config().section("subtitles"))
+
+    assert "Style: Card," in text
+    assert "대체문구" not in text
+    assert "3분 후" in text
+    assert text.count("Dialogue:") == 1

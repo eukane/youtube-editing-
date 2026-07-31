@@ -138,7 +138,8 @@ def _as_list(value) -> list[str]:
     return [str(v) for v in value]
 
 
-def load_packs(names, extra_dirs=None, *, builtin_dir: Path | None = None) -> list[MemeDef]:
+def load_packs(names, extra_dirs=None, *, builtin_dir: Path | None = None,
+               asset_dirs=None) -> list[MemeDef]:
     names = _as_list(names)
     extra_dirs = _as_list(extra_dirs)
     builtin_dir = Path(builtin_dir or BUILTIN_PACK_DIR)
@@ -160,6 +161,125 @@ def load_packs(names, extra_dirs=None, *, builtin_dir: Path | None = None) -> li
                 continue
             seen.add(key)
             memes.append(meme)
+
+    for asset_dir in _as_list(asset_dirs):
+        for meme in scan_asset_dir(asset_dir):
+            key = f"scan:{meme.id}"
+            if key in seen:
+                continue
+            seen.add(key)
+            memes.append(meme)
+    return memes
+
+
+# --------------------------------------------------------------------------
+# 파일만 넣으면 되는 자동 스캔
+# --------------------------------------------------------------------------
+
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+VIDEO_EXTS = {".gif", ".mp4", ".webm", ".mov", ".mkv"}
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"}
+
+# 파일명에서 옵션을 읽는 접미사: 무야호@right@2.5s.png
+_PLACEMENT_TOKENS = set(PLACEMENTS)
+
+
+def parse_asset_filename(name: str) -> dict:
+    """파일 이름 하나로 밈 정의를 만든다.
+
+    규칙 (전부 선택):
+      무야호.png                     → "무야호" 라고 말하면 뜸
+      죽었,사망,뒤졌.png             → 쉼표로 트리거 여러 개
+      개킹받네@right@2.5.png         → @위치, @노출시간(초)
+      hype@_.png                     → 트리거 대신 이벤트(hype/silence/timeskip)
+    """
+    stem = Path(name).stem
+    parts = [p.strip() for p in stem.split("@") if p.strip()]
+    head = parts[0] if parts else stem
+    options = parts[1:]
+
+    triggers: list[str] = []
+    events: list[str] = []
+    for token in head.replace("_", ",").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if token in ("hype", "peak", "silence", "timeskip"):
+            events.append(token)
+        else:
+            triggers.append(token)
+
+    placement = "top"
+    duration = 2.0
+    for option in options:
+        low = option.lower()
+        if low in _PLACEMENT_TOKENS:
+            placement = low
+            continue
+        try:
+            duration = float(low.rstrip("s"))
+        except ValueError:
+            continue
+    return {"triggers": triggers, "events": events, "placement": placement,
+            "duration": duration}
+
+
+def scan_asset_dir(directory: str | Path, *, pack_name: str = "scan") -> list[MemeDef]:
+    """폴더에 넣어 둔 이미지·움짤·효과음을 그대로 밈으로 만든다.
+
+    같은 이름의 오디오 파일이 있으면 효과음으로 자동으로 짝지어 준다.
+    (예: 무야호.png + 무야호.mp3 → 그림 뜨면서 소리도 같이)
+    """
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
+
+    files = sorted(p for p in directory.rglob("*") if p.is_file())
+    audio_by_stem = {p.stem: p for p in files if p.suffix.lower() in AUDIO_EXTS}
+    # 그림·영상과 이름이 같은 오디오는 그 밈의 효과음으로만 쓰고 단독 등록하지 않는다
+    paired_audio = {p.stem for p in files
+                    if p.suffix.lower() in IMAGE_EXTS | VIDEO_EXTS and p.stem in audio_by_stem}
+
+    memes: list[MemeDef] = []
+    for path in files:
+        suffix = path.suffix.lower()
+        if suffix in IMAGE_EXTS:
+            kind = "image"
+        elif suffix in VIDEO_EXTS:
+            kind = "video"
+        elif suffix in AUDIO_EXTS:
+            if path.stem in paired_audio:
+                continue
+            kind = "audio"
+        else:
+            continue
+
+        parsed = parse_asset_filename(path.name)
+        if not parsed["triggers"] and not parsed["events"]:
+            continue
+        twin = audio_by_stem.get(path.stem) if kind != "audio" else None
+        sfx = str(twin) if twin is not None else ""
+
+        base_id = (parsed["triggers"] or parsed["events"])[0]
+        meme_id = base_id
+        suffix_n = 2
+        while any(m.id == meme_id for m in memes):
+            meme_id = f"{base_id}{suffix_n}"
+            suffix_n += 1
+
+        memes.append(MemeDef(
+            id=meme_id,
+            kind=kind,
+            asset="" if kind == "audio" else str(path),
+            sfx=sfx or (str(path) if kind == "audio" else ""),
+            triggers=parsed["triggers"],
+            events=parsed["events"],
+            placement=parsed["placement"],
+            duration=parsed["duration"],
+            weight=1.6,  # 직접 넣은 밈을 기본 텍스트 밈보다 우선한다
+            pack=pack_name,
+            base_dir=directory,
+        ))
     return memes
 
 
@@ -205,6 +325,7 @@ def _to_cue(meme: MemeDef, out_t: float, source_t: float, trigger: str) -> MemeC
         sfx_volume=meme.sfx_volume,
         trigger=trigger,
         source_start=round(source_t, 3),
+        show_text=(kind == "text"),
         priority=meme.weight,
         cooldown=meme.cooldown,
     )
@@ -279,10 +400,17 @@ def plan_memes(plan: EditPlan, analysis: Analysis, memes: list[MemeDef], cfg: di
     cues = _enforce_spacing(candidates, cooldown=cooldown, min_gap=min_gap,
                             max_per_minute=max_per_minute)
 
+    # 3.5) 클립 사이 시간 점프 → "3분 후" 전환 카드
+    cues.extend(_timeskip_cues(plan, memes, cfg))
+
     # 4) 클립 시작 라벨 (간격 규칙과 무관하게 항상 표시)
     if cfg.get("clip_intro_label", True):
+        card_starts = [c.start for c in cues if c.trigger == "timeskip"]
         for clip in plan.clips:
             if not clip.label:
+                continue
+            # 전환 카드가 뜨는 클립은 라벨까지 겹치면 산만하다
+            if any(abs(clip.out_start - t) < 1.0 for t in card_starts):
                 continue
             cues.append(MemeCue(
                 start=round(clip.out_start + 0.15, 3),
@@ -298,6 +426,48 @@ def plan_memes(plan: EditPlan, analysis: Analysis, memes: list[MemeDef], cfg: di
 
     cues.sort(key=lambda c: c.start)
     return cues
+
+
+def humanize_gap(seconds: float) -> str:
+    """건너뛴 시간을 자막 카드용 문구로. (예: 185초 → '3분 후')"""
+    seconds = max(0.0, seconds)
+    if seconds < 90:
+        return f"{int(round(seconds / 10.0)) * 10 or 10}초 후"
+    if seconds < 3600:
+        return f"{int(round(seconds / 60.0))}분 후"
+    hours = seconds / 3600.0
+    if hours < 2:
+        return "1시간 후"
+    return f"{int(hours)}시간 후"
+
+
+def _timeskip_cues(plan: EditPlan, memes: list[MemeDef], cfg: dict) -> list[MemeCue]:
+    """클립과 클립 사이에 원본 시간이 크게 건너뛰면 전환 카드를 끼운다.
+
+    편집본만 보면 갑자기 상황이 바뀌어 있어서 시청자가 헷갈리는 걸 막아 주는,
+    이 바닥에서 제일 흔한 자막 연출.
+    """
+    threshold = float(cfg.get("timeskip_min", 90.0))
+    if threshold <= 0 or len(plan.clips) < 2:
+        return []
+    cards = [m for m in memes if "timeskip" in m.events]
+    if not cards:
+        return []
+
+    out: list[MemeCue] = []
+    usage: dict[str, int] = {}
+    for prev, nxt in zip(plan.clips, plan.clips[1:]):
+        gap = nxt.source_start - prev.source_end
+        if gap < threshold:
+            continue
+        meme = _pick(cards, usage)
+        usage[meme.id] = usage.get(meme.id, 0) + 1
+        cue = _to_cue(meme, nxt.out_start, nxt.source_start, "timeskip")
+        # 카드에 적힌 시간이 핵심이라, 배경 그림이 있어도 글자는 항상 얹는다
+        cue.text = (meme.text or "{gap}").replace("{gap}", humanize_gap(gap))
+        cue.show_text = True
+        out.append(cue)
+    return out
 
 
 def _enforce_spacing(cues: list[MemeCue], *, cooldown: float, min_gap: float,

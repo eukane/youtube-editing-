@@ -120,3 +120,52 @@ def test_packs_command_runs(capsys):
     assert main(["packs"]) == 0
     out = capsys.readouterr().out
     assert "death_again" in out
+
+
+def test_add_meme_registers_file_into_pack(tmp_path):
+    """gameedit add-meme 로 넣은 파일이 그대로 밈으로 로드되어야 한다."""
+    from gameedit.memes import load_pack
+
+    pack_dir = tmp_path / "mypack"
+    pack_dir.mkdir()
+    (pack_dir / "pack.yaml").write_text("name: mypack\nmemes:\n", encoding="utf-8")
+    source = tmp_path / "무야호.png"
+    source.write_bytes(b"\x89PNG")
+
+    rc = main(["add-meme", str(source), "--pack", str(pack_dir),
+               "-t", "무야호", "-t", "신난다", "--placement", "center", "--duration", "2.5"])
+    assert rc == 0
+    assert (pack_dir / "images" / "무야호.png").exists()
+
+    memes = {m.id: m for m in load_pack(pack_dir).memes}
+    assert memes["무야호"].kind == "image"
+    assert memes["무야호"].triggers == ["무야호", "신난다"]
+    assert memes["무야호"].placement == "center"
+    assert memes["무야호"].matches("와 신난다 진짜") == "신난다"
+
+
+def test_add_meme_audio_goes_to_sfx(tmp_path):
+    from gameedit.memes import load_pack
+
+    pack_dir = tmp_path / "p"
+    pack_dir.mkdir()
+    (pack_dir / "pack.yaml").write_text("name: p\nmemes:\n", encoding="utf-8")
+    source = tmp_path / "두둥.mp3"
+    source.write_bytes(b"ID3")
+
+    assert main(["add-meme", str(source), "--pack", str(pack_dir), "-e", "hype"]) == 0
+    meme = load_pack(pack_dir).memes[0]
+    assert meme.kind == "audio"
+    assert meme.sfx == "sfx/두둥.mp3"
+    assert meme.events == ["hype"]
+    assert meme.resolved_sfx() is not None
+
+
+def test_add_meme_rejects_unknown_format(tmp_path, capsys):
+    pack_dir = tmp_path / "p"
+    pack_dir.mkdir()
+    (pack_dir / "pack.yaml").write_text("name: p\nmemes:\n", encoding="utf-8")
+    source = tmp_path / "메모.txt"
+    source.write_text("x", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        main(["add-meme", str(source), "--pack", str(pack_dir)])

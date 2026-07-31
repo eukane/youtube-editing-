@@ -97,7 +97,9 @@ DEFAULTS: dict[str, Any] = {
     "memes": {
         "enabled": True,
         "packs": ["default"],
-        "pack_dirs": [],  # 추가 밈팩 폴더
+        "pack_dirs": [],  # 추가 밈팩 폴더 (pack.yaml 이 있는 폴더)
+        "asset_dirs": [],  # 파일만 넣어두면 파일명이 트리거가 되는 폴더
+        "timeskip_min": 90.0,  # 클립 사이 원본 시간이 이만큼 벌어지면 "N분 후" 카드
         "max_per_minute": 4.0,
         "cooldown": 7.0,
         "min_gap": 1.5,
