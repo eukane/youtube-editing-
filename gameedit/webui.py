@@ -360,6 +360,8 @@ async function poll(){
       j.status==='done' ? '✅ 완성됐습니다' :
       j.status==='error' ? '❌ ' + (j.error||'실패') : j.step;
     $('job-bar').style.width = (j.progress*100) + '%';
+    if (j.status === 'done' && j.summary.fallback)
+      $('job-step').textContent = '✅ 완성 (신호가 약해 균등 간격으로 잘랐습니다)';
     $('job-sum').textContent = j.status==='done' && j.summary.clips ?
       `${j.summary.source_duration_text} → ${j.summary.duration_text} · ` +
       `하이라이트 ${j.summary.clips}개 · 밈 ${j.summary.memes}개 · 자막 ${j.summary.subtitles}줄` : '';

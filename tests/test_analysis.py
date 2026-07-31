@@ -99,3 +99,25 @@ def test_two_level_audio_still_produces_contrast(tmp_path):
     assert analysis.mean_between(3.5, 4.5) > 0.5
     assert analysis.mean_between(0.5, 2.5) < 0.2
     assert len(analysis.peaks) >= 2
+
+
+def test_rotated_video_reports_real_frame_size():
+    """폰으로 찍은 세로 영상은 회전 정보만 붙어 있고 저장은 가로로 돼 있다.
+
+    ffmpeg 이 디코딩할 때 돌려주므로, 우리가 들고 있는 크기도 돌린 뒤 기준이어야
+    스케일·자막 좌표계가 맞는다.
+    """
+    from gameedit.media import _rotation_swaps_dimensions
+
+    assert _rotation_swaps_dimensions(90) is True
+    assert _rotation_swaps_dimensions(-90) is True
+    assert _rotation_swaps_dimensions(270) is True
+    assert _rotation_swaps_dimensions(180) is False
+    assert _rotation_swaps_dimensions(0) is False
+
+
+def test_rotation_parsed_from_ffmpeg_output():
+    from gameedit.media import _ROTATION_RE
+
+    text = "    Side data:\n      displaymatrix: rotation of -90.00 degrees\n"
+    assert _ROTATION_RE.search(text).group(1) == "-90.00"

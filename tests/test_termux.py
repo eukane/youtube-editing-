@@ -156,29 +156,38 @@ def test_generated_launcher_actually_starts_the_server(termux):
     """설치 스크립트가 만든 '편집기' 명령으로 서버가 진짜 뜨는지."""
     assert run_script("termux설치.sh", termux).returncode == 0
 
-    # 셔뱅이 실제 Termux 경로(#!/data/data/...)를 가리키므로 여기서는 bash 로 실행한다
+    import signal
+    import socket
+    import urllib.request
+
+    with socket.socket() as probe:            # 빈 포트를 골라 쓴다
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    # 셔뱅이 실제 Termux 경로(#!/data/data/...)를 가리키므로 여기서는 bash 로 실행한다.
+    # 파이썬은 bash 의 자식이라, 프로세스 그룹째 정리해야 포트가 남지 않는다.
     launcher = str(termux["prefix"] / "bin" / "편집기")
-    proc = subprocess.Popen(["bash", launcher, "--port", "8931"], env=termux["env"],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(["bash", launcher, "--port", str(port)], env=termux["env"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            start_new_session=True)
     try:
         output = ""
         for _ in range(60):
             line = proc.stdout.readline()
             output += line
-            if "localhost:8931" in output:
+            if f"localhost:{port}" in output:
                 break
-        assert "localhost:8931" in output, output
+        assert f"localhost:{port}" in output, output
         assert "크롬을 열고" in output          # 폰 단독 모드 안내
         assert "?k=" not in output              # 접속 번호 없이 열린다
 
-        import urllib.request
-        with urllib.request.urlopen("http://127.0.0.1:8931/health", timeout=5) as res:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as res:
             assert res.status == 200
-        with urllib.request.urlopen("http://127.0.0.1:8931/", timeout=5) as res:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as res:
             page = res.read().decode()
         assert "{{DEVICE}}" not in page          # 자리표시자가 남아 있으면 안 된다
     finally:
-        proc.terminate()
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         proc.wait(timeout=10)
 
     assert "termux-wake-lock" in termux["log"].read_text()

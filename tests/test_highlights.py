@@ -72,9 +72,42 @@ def test_label_categories():
     assert label_for("평범한 대사", 3)[1].startswith("🔥")
 
 
-def test_empty_analysis_returns_no_clips(analysis, hcfg):
+def test_zero_length_video_returns_no_clips(analysis, hcfg):
     analysis.audio.excitement = []
     analysis.transcript.segments = []
     analysis.scenes = []
     analysis.media.duration = 0.0
     assert build_clips(analysis, hcfg) == []
+
+
+def test_falls_back_to_even_clips_when_there_is_no_signal(analysis, hcfg):
+    """마이크 없이 녹화해서 소리도 대사도 없을 때 빈손으로 끝내면 안 된다."""
+    analysis.audio.excitement = []
+    analysis.audio.peaks = []
+    analysis.audio.silences = []
+    analysis.transcript.segments = []
+    analysis.scenes = []
+    analysis.media.duration = 300.0
+
+    clips = build_clips(analysis, dict(hcfg, target_duration=60.0))
+    assert clips, "신호가 없어도 클립은 나와야 한다"
+    assert all(c.reason == "fallback" for c in clips)
+    assert clips == sorted(clips, key=lambda c: c.source_start)
+    for clip in clips:
+        assert 0 <= clip.source_start < clip.source_end <= 300.0
+    total = sum(c.duration for c in clips)
+    assert 30 <= total <= 90          # 목표(60초) 언저리
+    assert all(c.label for c in clips)
+
+
+def test_video_shorter_than_min_clip_uses_whole_thing(analysis, hcfg):
+    """4초짜리 테스트 영상으로 돌려봐도 결과가 나와야 한다."""
+    analysis.audio.excitement = []
+    analysis.transcript.segments = []
+    analysis.scenes = []
+    analysis.media.duration = 4.0
+
+    clips = build_clips(analysis, hcfg)
+    assert len(clips) == 1
+    assert clips[0].source_start == 0.0
+    assert clips[0].source_end == 4.0

@@ -117,6 +117,7 @@ class MediaInfo:
     height: int = 0
     fps: float = 30.0
     has_audio: bool = True
+    rotation: float = 0.0  # 회전 정보(도). width/height 는 이미 반영된 값이다.
 
     @property
     def resolution(self) -> str:
@@ -241,6 +242,46 @@ class EditPlan:
             if clip.contains_source(source_t):
                 return clip.to_out(source_t)
         return None
+
+    def sanitize(self, *, min_clip: float = 0.2) -> list[str]:
+        """말이 안 되는 클립을 걸러낸다.
+
+        plan.json 은 사람이 직접 고치라고 만든 파일이라 오타가 들어오기 쉽다.
+        뒤집힌 구간·음수·영상 밖 구간을 그대로 ffmpeg 에 넘기면 검은 화면이
+        섞인 결과물이 조용히 나온다. 무엇을 버렸는지 돌려준다.
+        """
+        duration = self.media.duration or 0.0
+        problems: list[str] = []
+        kept: list[Clip] = []
+
+        for i, clip in enumerate(self.clips, start=1):
+            start, end = float(clip.source_start), float(clip.source_end)
+            if end == start:
+                problems.append(f"{i}번 클립: 시작과 끝이 같아({start:g}초) 버렸습니다")
+                continue
+            if end < start:
+                problems.append(f"{i}번 클립: 끝({end:g}초)이 시작({start:g}초)보다 앞이라 버렸습니다")
+                continue
+            if start < 0:
+                problems.append(f"{i}번 클립: 시작이 음수({start:g}초)라 0초로 맞췄습니다")
+                start = 0.0
+            if duration > 0:
+                if start >= duration:
+                    problems.append(
+                        f"{i}번 클립: 원본 길이({duration:g}초)를 벗어나 버렸습니다")
+                    continue
+                if end > duration:
+                    problems.append(f"{i}번 클립: 끝을 원본 길이({duration:g}초)로 맞췄습니다")
+                    end = duration
+            if end - start < min_clip:
+                problems.append(f"{i}번 클립: 너무 짧아({end - start:g}초) 버렸습니다")
+                continue
+            clip.source_start, clip.source_end = round(start, 3), round(end, 3)
+            kept.append(clip)
+
+        self.clips = kept
+        self.relayout()
+        return problems
 
     def remap_cues(self) -> None:
         """클립을 지우거나 순서를 바꾼 뒤 밈·자막을 다시 붙인다.

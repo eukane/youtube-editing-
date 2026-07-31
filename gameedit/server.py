@@ -210,7 +210,8 @@ class JobManager:
 
                 if render_only:
                     plan = plan_from_dict(load_json(work_dir / "plan.json"))
-                    plan.relayout()
+                    for problem in plan.sanitize():
+                        log(f"⚠ {problem}")
                 else:
                     plan = self._analyze_and_plan(job, config, work_dir, log)
 
@@ -275,6 +276,7 @@ class JobManager:
 
     def _summary(self, plan: EditPlan) -> dict:
         return {
+            "fallback": bool(plan.meta.get("fallback")),
             "clips": len(plan.clips),
             "memes": len(plan.memes),
             "subtitles": len(plan.subtitles),
@@ -318,17 +320,35 @@ def plan_for_phone(plan: EditPlan) -> dict:
             "duration_text": format_timecode(plan.duration)}
 
 
+def _as_index(value) -> int | None:
+    """폰에서 온 값은 문자열일 수도, 쓰레기일 수도 있다."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def apply_phone_edits(plan: EditPlan, edits: dict) -> EditPlan:
-    """폰에서 보낸 수정 사항을 편집 계획에 반영."""
-    removed = {int(i) for i in edits.get("removed_clips", [])}
+    """폰에서 보낸 수정 사항을 편집 계획에 반영.
+
+    잘못된 값이 섞여 와도 서버가 죽지 않도록 조용히 무시한다.
+    """
+    raw_removed = edits.get("removed_clips") or []
+    if isinstance(raw_removed, (str, bytes)) or not hasattr(raw_removed, "__iter__"):
+        raw_removed = []
+    removed = {i for i in (_as_index(v) for v in raw_removed) if i is not None}
     if removed:
         plan.clips = [c for i, c in enumerate(plan.clips) if i not in removed]
 
-    for raw_index, text in (edits.get("subtitle_edits") or {}).items():
-        index = int(raw_index)
-        if 0 <= index < len(plan.subtitles):
-            lines = [ln for ln in str(text).split("\n") if ln.strip()]
-            plan.subtitles[index].lines = lines or [str(text)]
+    subtitle_edits = edits.get("subtitle_edits") or {}
+    if not isinstance(subtitle_edits, dict):
+        subtitle_edits = {}
+    for raw_index, text in subtitle_edits.items():
+        index = _as_index(raw_index)
+        if index is None or text is None or not (0 <= index < len(plan.subtitles)):
+            continue
+        lines = [ln for ln in str(text).split("\n") if ln.strip()]
+        plan.subtitles[index].lines = lines or [str(text)]
 
     if edits.get("drop_memes"):
         plan.memes = [c for c in plan.memes if c.meme_id == "clip_label"]
@@ -612,11 +632,41 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json({"path": str(target), "name": target.name})
 
+    def _allowed_source(self, source: Path) -> bool:
+        """서버가 편집해도 되는 파일인지.
+
+        업로드 폴더와 사용자가 지정한 감시 폴더 안에 있는 것만 허용한다.
+        폰이 보낸 경로를 그대로 믿으면 아무 파일이나 열어보게 된다.
+        """
+        try:
+            resolved = source.resolve()
+        except OSError:
+            return False
+        roots = [self.manager.root / "uploads", *self.watch_dirs]
+        for root in roots:
+            try:
+                resolved.relative_to(root.resolve())
+                return True
+            except (ValueError, OSError):
+                continue
+        return False
+
     def _handle_create_job(self) -> None:
         data = self._read_json_body()
-        source = Path(str(data.get("path", "")))
-        if not source.exists():
+        raw_path = str(data.get("path", "")).strip()
+        if not raw_path:
+            self._send_json({"error": "영상 파일을 고르지 않았습니다"}, 400)
+            return
+        source = Path(raw_path)
+        if not source.is_file():
             self._send_json({"error": f"파일을 찾을 수 없습니다: {source}"}, 400)
+            return
+        if source.suffix.lower() not in VIDEO_EXTS:
+            self._send_json({"error": f"영상 파일이 아닙니다: {source.name}"}, 400)
+            return
+        if not self._allowed_source(source):
+            self._send_json({"error": "이 폴더의 파일은 편집할 수 없습니다. "
+                                      "업로드하거나 감시 폴더에 넣어 주세요."}, 403)
             return
         options = {
             "target_duration": data.get("target_duration"),
@@ -642,6 +692,7 @@ class Handler(BaseHTTPRequestHandler):
 
         edits = self._read_json_body()
         plan = plan_from_dict(load_json(plan_path))
+        plan.sanitize()
         plan = apply_phone_edits(plan, edits)
         if not plan.clips:
             self._send_json({"error": "클립을 전부 지우면 만들 수 없습니다"}, 400)

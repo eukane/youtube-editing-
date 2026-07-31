@@ -29,9 +29,15 @@ def _noop_progress(_label: str, _fraction: float) -> None:
 
 
 def escape_filter_path(path: str | Path) -> str:
-    """filter_complex 안에 파일 경로를 넣기 위한 이스케이프."""
-    text = str(path)
-    text = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    """filter_complex 안에 파일 경로를 넣기 위한 이스케이프.
+
+    윈도우 경로의 역슬래시는 ffmpeg 필터 문법과 겹쳐서 이스케이프가 겹겹이 쌓인다.
+    ffmpeg 는 윈도우에서도 슬래시 경로를 받아주므로 슬래시로 바꾼 뒤
+    드라이브 문자의 콜론만 처리하는 편이 훨씬 안전하다.
+        C:\\Users\\철수\\subs.ass  →  C\\:/Users/철수/subs.ass
+    """
+    text = str(path).replace("\\", "/")
+    text = text.replace("'", "\\'").replace(":", "\\:")
     text = text.replace("[", "\\[").replace("]", "\\]").replace(",", "\\,")
     return text
 

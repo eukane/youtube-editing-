@@ -212,3 +212,38 @@ def test_unknown_profile_is_rejected():
 
     with pytest.raises(ValueError, match="모르는 프로필"):
         apply_profile({}, "없는프로필")
+
+
+# ------------------------------------------------------------------ plan.json 검사
+
+def test_sanitize_drops_impossible_clips():
+    """plan.json 은 사람이 고치는 파일이라 이상한 값이 들어온다."""
+    from gameedit.models import Clip, EditPlan, MediaInfo
+
+    plan = EditPlan(media=MediaInfo(duration=100.0), clips=[
+        Clip(source_start=27.0, source_end=22.0),    # 뒤집힘
+        Clip(source_start=-10.0, source_end=30.0),   # 음수 시작
+        Clip(source_start=50.0, source_end=120.0),   # 끝이 원본 밖
+        Clip(source_start=9999.0, source_end=10050.0),  # 통째로 원본 밖
+        Clip(source_start=5.0, source_end=5.0),      # 길이 0
+        Clip(source_start=60.0, source_end=70.0),    # 정상
+    ])
+    problems = plan.sanitize()
+
+    assert len(plan.clips) == 3
+    assert plan.clips[0].source_start == 0.0 and plan.clips[0].source_end == 30.0
+    assert plan.clips[1].source_end == 100.0      # 원본 길이로 잘림
+    assert plan.clips[2].source_start == 60.0
+    assert len(problems) == 5      # 버린 3건 + 고친 2건
+    assert any("음수" in p for p in problems)
+    assert any("원본 길이" in p for p in problems)
+    assert plan.duration == pytest.approx(30.0 + 50.0 + 10.0)
+    # out_start 가 다시 계산돼야 한다
+    assert [c.out_start for c in plan.clips] == pytest.approx([0.0, 30.0, 80.0])
+
+
+def test_sanitize_keeps_valid_plan_untouched(analysis):
+    plan = build_plan(analysis, Config())
+    before = [(c.source_start, c.source_end) for c in plan.clips]
+    assert plan.sanitize() == []
+    assert [(c.source_start, c.source_end) for c in plan.clips] == before

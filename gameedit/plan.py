@@ -34,11 +34,20 @@ def build_plan(analysis: Analysis, config: Config) -> EditPlan:
         "subtitle_count": len(plan.subtitles),
         "meme_packs": list(meme_cfg.get("packs", [])),
         "language": analysis.transcript.language,
+        "fallback": bool(plan.clips) and all(c.reason == "fallback" for c in plan.clips),
     }
     return plan
 
 
-def load_plan(path: str | Path) -> EditPlan:
+def load_plan(path: str | Path, *, log=None) -> EditPlan:
+    """저장된 편집 계획을 읽는다. 사람이 고친 파일이라 항상 검사한다."""
     plan = plan_from_dict(load_json(path))
-    plan.relayout()
+    problems = plan.sanitize()
+    if problems and log:
+        log(f"⚠ plan.json 에서 이상한 값 {len(problems)}건을 고쳤습니다:")
+        for problem in problems[:8]:
+            log(f"   · {problem}")
+        if len(problems) > 8:
+            log(f"   · … 외 {len(problems) - 8}건")
+    plan.remap_cues()
     return plan

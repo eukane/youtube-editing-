@@ -108,6 +108,13 @@ def test_escape_filter_path():
     assert " " in escaped  # 공백은 따옴표로 감싸므로 그대로
 
 
+def test_escape_filter_path_windows():
+    """윈도우 역슬래시는 ffmpeg 필터 문법과 충돌해서 슬래시로 바꿔 넣는다."""
+    escaped = escape_filter_path(r"C:\Users\철수\내 영상\subtitles.ass")
+    assert escaped == "C\\:/Users/철수/내 영상/subtitles.ass"
+    assert "\\\\" not in escaped  # 역슬래시가 겹겹이 쌓이면 안 된다
+
+
 def test_placement_expressions():
     for name in ("top", "center", "bottom", "left", "right"):
         x, y = placement_expr(name)

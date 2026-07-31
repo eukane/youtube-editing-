@@ -238,6 +238,10 @@ def cmd_plan(args) -> int:
 
 def _print_plan_summary(plan: EditPlan, outputs: dict[str, Path]) -> None:
     log("")
+    if plan.meta.get("fallback"):
+        log("⚠ 소리·대사에서 하이라이트 신호를 찾지 못해 균등 간격으로 잘랐습니다.")
+        log("  (마이크 없이 녹화했거나, 영상이 짧거나, 전체가 조용한 경우입니다)")
+        log("")
     log(f"하이라이트 {len(plan.clips)}개 · 밈 {len(plan.memes)}개 · 자막 {len(plan.subtitles)}줄")
     log(f"원본 {format_timecode(plan.media.duration)} → 편집본 {format_timecode(plan.duration)}")
     for i, clip in enumerate(plan.clips[:12], start=1):
@@ -271,7 +275,9 @@ def cmd_render(args) -> int:
     plan_path = work_dir / "plan.json"
     if not plan_path.exists():
         raise SystemExit(f"편집 계획이 없습니다: {plan_path}\n먼저 `gameedit plan` 을 실행하세요.")
-    plan = load_plan(plan_path)
+    plan = load_plan(plan_path, log=log)
+    if not plan.clips:
+        raise SystemExit("쓸 수 있는 클립이 없습니다. plan.json 의 clips 를 확인하세요.")
 
     # plan.json 을 손으로 고쳤을 수 있으므로 자막 파일을 다시 만든다
     sub_cfg = config.section("subtitles")

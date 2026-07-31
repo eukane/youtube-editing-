@@ -266,9 +266,46 @@ def label_for(text: str, index: int, categories=None) -> tuple[str, str]:
     return "highlight", f"🔥 하이라이트 {index}"
 
 
+def fallback_clips(duration: float, cfg: dict) -> list[Clip]:
+    """점수로 고를 게 하나도 없을 때 균등 간격으로라도 잘라 준다.
+
+    소리가 없거나(마이크 없이 녹화), 전부 조용하거나, 영상이 min_clip 보다 짧으면
+    점수판이 통째로 0이 된다. 그렇다고 결과물을 아예 못 만들어 주는 것보다는
+    고르게 잘라 주고 사실을 알려주는 편이 낫다.
+    """
+    if duration <= 0:
+        return []
+    min_clip = float(cfg.get("min_clip", 6.0))
+    max_clip = float(cfg.get("max_clip", 45.0))
+    target = min(float(cfg.get("target_duration", 480.0)), duration)
+
+    # 통째로 쓰는 게 자연스러운 경우 (짧은 영상, 목표 길이가 원본과 비슷한 경우)
+    if duration <= max(min_clip, 12.0) or target >= duration * 0.9:
+        return [Clip(source_start=0.0, source_end=round(duration, 3), reason="fallback",
+                     label="🎬 전체")]
+
+    clip_len = min(max(target / 6.0, min_clip), max_clip, duration)
+    count = max(1, min(int(round(target / clip_len)), int(duration // clip_len)))
+    step = duration / count
+
+    clips: list[Clip] = []
+    for i in range(count):
+        center = step * (i + 0.5)
+        start = min(max(0.0, center - clip_len / 2), duration - clip_len)
+        clips.append(Clip(source_start=round(start, 3),
+                          source_end=round(start + clip_len, 3),
+                          reason="fallback", label=f"🎬 구간 {i + 1}"))
+    return clips
+
+
 def build_clips(analysis: Analysis, cfg: dict) -> list[Clip]:
     grid = build_score_grid(analysis, cfg)
     ranges = select_ranges(grid, cfg)
+    # 격자는 항상 한 칸 이상이라 grid.duration 을 그대로 쓰면 길이 0 인 영상도 1초가 된다
+    duration = max(analysis.media.duration, analysis.audio.duration,
+                   analysis.transcript.duration)
+    if duration <= 0:
+        return []
 
     pad_before = float(cfg.get("pad_before", 1.5))
     pad_after = float(cfg.get("pad_after", 1.2))
@@ -276,7 +313,6 @@ def build_clips(analysis: Analysis, cfg: dict) -> list[Clip]:
     min_clip = float(cfg.get("min_clip", 6.0))
     max_clip = float(cfg.get("max_clip", 45.0))
     target = float(cfg.get("target_duration", 480.0))
-    duration = grid.duration
 
     padded: list[tuple[float, float]] = []
     for start, end, _score in ranges:
@@ -338,6 +374,9 @@ def build_clips(analysis: Analysis, cfg: dict) -> list[Clip]:
         kept.append(clip)
         total += clip.duration
     kept.sort(key=lambda c: c.source_start)
+
+    if not kept:
+        return fallback_clips(duration, cfg)
 
     peaks = [t for t, _ in analysis.audio.peaks]
     for i, clip in enumerate(kept, start=1):

@@ -84,6 +84,12 @@ _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)")
 _VIDEO_RE = re.compile(r"Stream #\d+:\d+.*Video:.*?(\d{2,5})x(\d{2,5})")
 _FPS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*fps")
 _AUDIO_RE = re.compile(r"Stream #\d+:\d+.*Audio:")
+_ROTATION_RE = re.compile(r"displaymatrix:\s*rotation of\s*(-?\d+(?:\.\d+)?)\s*degrees")
+
+
+def _rotation_swaps_dimensions(rotation: float) -> bool:
+    """90·270도 회전이면 가로세로가 뒤바뀐다."""
+    return round(abs(float(rotation))) % 180 == 90
 
 
 def _parse_rate(value: str) -> float:
@@ -123,6 +129,18 @@ def probe(path: str | Path) -> MediaInfo:
         if video:
             info.width = int(video.get("width") or 0)
             info.height = int(video.get("height") or 0)
+            # 폰으로 찍은 세로 영상은 회전 정보만 붙어 있고 저장은 가로로 돼 있다.
+            # ffmpeg 이 디코딩할 때 알아서 돌려주므로 실제 프레임 크기로 바꿔 둔다.
+            rotation = 0.0
+            for side in video.get("side_data_list") or []:
+                if "rotation" in side:
+                    rotation = float(side.get("rotation") or 0)
+                    break
+            else:
+                rotation = float((video.get("tags") or {}).get("rotate") or 0)
+            info.rotation = rotation
+            if _rotation_swaps_dimensions(rotation):
+                info.width, info.height = info.height, info.width
             fps = _parse_rate(video.get("avg_frame_rate") or "") or _parse_rate(
                 video.get("r_frame_rate") or ""
             )
@@ -150,6 +168,11 @@ def _probe_with_ffmpeg(path: str) -> MediaInfo:
         line = text[vm.start(): text.find("\n", vm.start())]
         fm = _FPS_RE.search(line)
         info.fps = float(fm.group(1)) if fm else 30.0
+        rm = _ROTATION_RE.search(text)
+        if rm:
+            info.rotation = float(rm.group(1))
+            if _rotation_swaps_dimensions(info.rotation):
+                info.width, info.height = info.height, info.width
 
     info.has_audio = bool(_AUDIO_RE.search(text))
     if info.duration <= 0:

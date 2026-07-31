@@ -293,3 +293,52 @@ def test_restart_marks_unfinished_jobs(tmp_path):
     manager = JobManager(tmp_path, Config())
     manager.restore()
     assert manager.get("dead01").status == "error"
+
+
+def test_only_allowed_folders_can_be_edited(server, tmp_path):
+    """폰이 보낸 경로를 그대로 믿으면 아무 파일이나 열어보게 된다."""
+    outside = tmp_path.parent / "바깥.mp4"
+    outside.write_bytes(b"video")
+    body = json.dumps({"path": str(outside)}).encode()
+    req = urllib.request.Request(f"{server[0]}/api/jobs", data=body, method="POST")
+    req.add_header("X-Key", "1234")
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=5)
+    assert exc.value.code == 403
+
+
+def test_non_video_and_empty_paths_rejected(server, tmp_path):
+    (tmp_path / "uploads").mkdir(exist_ok=True)
+    note = tmp_path / "uploads" / "메모.txt"
+    note.write_text("x", encoding="utf-8")
+
+    for payload, expected in [({"path": str(note)}, 400), ({"path": ""}, 400), ({}, 400)]:
+        body = json.dumps(payload).encode()
+        req = urllib.request.Request(f"{server[0]}/api/jobs", data=body, method="POST")
+        req.add_header("X-Key", "1234")
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req, timeout=5)
+        assert exc.value.code == expected
+
+
+def test_broken_json_body_does_not_create_a_job(server):
+    req = urllib.request.Request(f"{server[0]}/api/jobs", data="{{{깨진".encode("utf-8"), method="POST")
+    req.add_header("X-Key", "1234")
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=5)
+    assert exc.value.code == 400
+    assert get_json(f"{server[0]}/api/jobs")["jobs"] == []
+
+
+def test_garbage_edits_are_ignored_not_crashing(plan):
+    """폰에서 이상한 값이 와도 서버가 죽으면 안 된다."""
+    for edits in [{"removed_clips": ["abc", None, 1.7]},
+                  {"removed_clips": "전부"},
+                  {"subtitle_edits": {"안녕": "x"}},
+                  {"subtitle_edits": {"0": None}},
+                  {"subtitle_edits": "문자열"},
+                  {"removed_clips": [99999, -5]}]:
+        import copy
+        result = apply_phone_edits(copy.deepcopy(plan), edits)
+        assert result.clips, edits
+        assert all(c.start >= 0 for c in result.memes)
