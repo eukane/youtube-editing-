@@ -348,6 +348,60 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def cmd_learn(args) -> int:
+    """좋아하는 편집자의 완성본을 재서 그 리듬을 설정으로 옮긴다."""
+    from .learn import describe, measure_style, merge_profiles, save_style, style_to_config
+
+    config = load_config(args)
+    acfg = config.section("analyze")
+
+    profiles = []
+    for i, src in enumerate(args.sources, start=1):
+        if not Path(src).exists():
+            log(f"⚠ 파일이 없습니다: {src}")
+            continue
+        log(f"[{i}/{len(args.sources)}] {Path(src).name}")
+        profile = measure_style(src, acfg, log=lambda m: log(f"      {m}"))
+        log(indent(describe(profile), "      "))
+        log("")
+        profiles.append(profile)
+
+    if not profiles:
+        log("❌ 잴 수 있는 영상이 없습니다.")
+        return 1
+
+    merged = merge_profiles(profiles)
+    if len(profiles) > 1:
+        log("=== 전체 평균 ===")
+        log(indent(describe(merged), "  "))
+        log("")
+
+    settings = style_to_config(merged)
+    if not settings:
+        log("⚠ 옮길 만한 수치를 못 뽑았습니다. 컷이 뚜렷한 편집본으로 다시 시도해 주세요.")
+        return 1
+
+    log("이 영상의 리듬을 우리 설정으로 옮기면:")
+    for key, value in settings.items():
+        log(f"  {key} = {value}")
+    log("")
+
+    out = save_style(args.output, settings, merged)
+    log(f"저장했습니다 → {out}")
+    log("")
+    log("이 스타일로 편집하려면:")
+    log(f"  gameedit auto 내영상.mp4 -c {out}")
+    log(f"  (폰이면)  edit -c {out}")
+    log("")
+    log("⚠ 잰 것은 컷 리듬과 죽은 시간뿐입니다. 자막·밈·줌은 화면에 구워져 있어")
+    log("  이 방법으로는 측정할 수 없습니다.")
+    return 0
+
+
+def indent(text: str, prefix: str) -> str:
+    return "\n".join(prefix + line for line in text.splitlines())
+
+
 def cmd_packs(args) -> int:
     config = load_config(args)
     meme_cfg = config.section("memes")
@@ -526,6 +580,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="폰 안에서 단독 실행 (127.0.0.1 로만 열고 접속 번호 없음)")
     _add_common(p)
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("learn", help="편집된 영상의 컷 리듬을 재서 설정으로 옮기기")
+    p.add_argument("sources", nargs="+",
+                   help="이미 편집이 끝난 참고 영상 (여러 개 넣으면 평균을 냅니다)")
+    p.add_argument("-o", "--output", default="style.yaml", help="저장할 설정 파일")
+    _add_common(p)
+    p.set_defaults(func=cmd_learn)
 
     p = sub.add_parser("packs", help="사용 중인 밈 목록 보기")
     p.add_argument("--missing", action="store_true",

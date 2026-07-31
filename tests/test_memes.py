@@ -280,3 +280,13 @@ def test_hype_reactions_vary():
     hype = [m for m in load_packs(["default"]) if "hype" in m.events]
     assert len(hype) >= 3
     assert len({m.text for m in hype}) == len(hype)
+
+
+def test_generated_sfx_are_wired_up():
+    """합성해 넣은 효과음이 실제로 밈에 붙는지."""
+    memes = load_packs(["default"])
+    with_sfx = [m for m in memes if m.resolved_sfx()]
+    assert len(with_sfx) >= 12, "효과음이 붙은 밈이 너무 적다"
+    for meme in with_sfx:
+        path = meme.resolved_sfx()
+        assert path.exists() and path.stat().st_size > 2000, f"{path} 가 비어 있다"
