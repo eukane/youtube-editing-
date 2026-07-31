@@ -648,12 +648,45 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_create_job()
             return
 
+        if path == "/api/files/delete":
+            self._handle_delete_file()
+            return
+
         m = re.match(r"^/api/jobs/([0-9a-f]+)/replan$", path)
         if m:
             self._handle_replan(m.group(1))
             return
 
         self._send_json({"error": "없는 주소"}, 404)
+
+    def _handle_delete_file(self) -> None:
+        """폰에서 고른 영상 파일을 지운다.
+
+        되돌릴 수 없는 동작이라 편집할 수 있는 폴더(업로드·감시 폴더) 안에
+        있는 파일만 지운다. 경로를 그대로 믿으면 아무 파일이나 지우게 된다.
+        """
+        data = self._read_json_body()
+        raw = str(data.get("path") or "")
+        if not raw:
+            self._send_json({"error": "지울 파일을 못 찾았습니다"}, 400)
+            return
+
+        target = Path(raw)
+        if not self._allowed_source(target):
+            self._send_json({"error": "이 폴더의 파일은 지울 수 없습니다"}, 403)
+            return
+        if target.suffix.lower() not in VIDEO_EXTS or not target.is_file():
+            self._send_json({"error": "영상 파일이 아닙니다"}, 400)
+            return
+
+        try:
+            freed = target.stat().st_size
+            target.unlink()
+        except OSError as err:
+            self._send_json({"error": f"지우지 못했습니다: {err}"}, 500)
+            return
+        self._send_json({"ok": True, "name": target.name,
+                         "freed_mb": round(freed / 1024 / 1024, 1)})
 
     # -- 처리 --------------------------------------------------------------
     def _available_files(self) -> list[dict]:

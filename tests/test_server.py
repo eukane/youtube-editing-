@@ -469,3 +469,83 @@ def test_length_options_are_clamped_in_the_ui():
     assert "function lengthsFor" in PAGE
     body = re.search(r"function lengthsFor\(file\)\{(.*?)\n\}", PAGE, re.S).group(1)
     assert "duration" in body and "filter" in body
+
+
+# --------------------------------------------------- 영상 지우기 (되돌릴 수 없음)
+
+def post_json(base, path, payload, key="1234"):
+    req = urllib.request.Request(
+        f"{base}{path}", method="POST",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "X-Key": key})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as res:
+            return res.status, json.loads(res.read().decode())
+    except urllib.error.HTTPError as err:
+        return err.code, json.loads(err.read().decode())
+
+
+def test_uploaded_video_can_be_deleted(server, tmp_path):
+    base, _, _ = server
+    target = tmp_path / "uploads" / "지울영상.mp4"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"x" * 2048)
+
+    status, body = post_json(base, "/api/files/delete", {"path": str(target)})
+    assert status == 200 and body["ok"] is True
+    assert body["name"] == "지울영상.mp4"
+    assert not target.exists()
+
+
+def test_deleting_outside_the_allowed_folders_is_refused(server, tmp_path):
+    base, _, _ = server
+    outsider = tmp_path.parent / "남의영상.mp4"
+    outsider.write_bytes(b"x")
+
+    status, _body = post_json(base, "/api/files/delete", {"path": str(outsider)})
+    assert status == 403
+    assert outsider.exists(), "허용되지 않은 경로의 파일이 지워졌다"
+
+
+def test_only_video_files_can_be_deleted(server, tmp_path):
+    base, _, _ = server
+    target = tmp_path / "uploads" / "중요.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("{}")
+
+    status, _body = post_json(base, "/api/files/delete", {"path": str(target)})
+    assert status == 400
+    assert target.exists()
+
+
+def test_deleting_a_missing_file_reports_cleanly(server, tmp_path):
+    base, _, _ = server
+    ghost = tmp_path / "uploads" / "없는영상.mp4"
+    status, body = post_json(base, "/api/files/delete", {"path": str(ghost)})
+    assert status == 400 and "error" in body
+
+
+def test_delete_without_a_path_is_refused(server):
+    base, _, _ = server
+    status, body = post_json(base, "/api/files/delete", {})
+    assert status == 400 and "error" in body
+
+
+def test_delete_needs_the_access_key(server, tmp_path):
+    base, _, _ = server
+    target = tmp_path / "uploads" / "지키자.mp4"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"x")
+
+    status, _body = post_json(base, "/api/files/delete", {"path": str(target)}, key="")
+    assert status == 401
+    assert target.exists(), "접속 번호 없이 남의 파일을 지울 수 있으면 안 된다"
+
+
+def test_ui_has_a_delete_button_with_confirmation():
+    from gameedit.webui import PAGE
+
+    assert "delFile" in PAGE and "/api/files/delete" in PAGE
+    body = PAGE[PAGE.index("async function delFile"):]
+    assert "confirm(" in body, "확인 없이 지우면 안 된다"
+    assert "되돌릴 수 없습니다" in body

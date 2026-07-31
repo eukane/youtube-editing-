@@ -55,6 +55,8 @@ h2:first-child{margin-top:6px}
   background:var(--card); border:1px solid var(--line); color:var(--dim); font-size:15px;
 }
 .chip.on{background:rgba(88,166,255,.16); border-color:var(--accent); color:var(--accent)}
+.trash{flex:none; padding:10px 12px; font-size:19px; opacity:.55; border-radius:10px}
+.trash:active{background:#3a1d1d; opacity:1}
 .row{display:flex; align-items:center; justify-content:space-between; gap:12px;
      padding:14px 0; border-bottom:1px solid var(--line)}
 .row:last-child{border-bottom:none}
@@ -287,11 +289,17 @@ function pick(input){
 async function refresh(){
   try {
     const {files} = await api('/api/files');
-    $('files').innerHTML = files.length ? files.map(f => `
-      <div class="row" onclick='openOptions(${JSON.stringify(f).replace(/'/g,"&#39;")})'>
-        <div class="grow"><div class="label">🎬 ${esc(f.name)}</div>
-        <div class="sub">${f.size_mb} MB</div></div><div class="muted">›</div>
-      </div>`).join('') :
+    state.fileList = files;
+    const total = files.reduce((s,f) => s + (f.size_mb||0), 0);
+    $('files').innerHTML = files.length ? files.map((f,i) => `
+      <div class="row">
+        <div class="grow" onclick="openOptions(state.fileList[${i}])">
+          <div class="label">🎬 ${esc(f.name)}</div>
+          <div class="sub">${f.duration ? fmtDuration(f.duration)+' · ' : ''}${f.size_mb} MB</div>
+        </div>
+        <div class="trash" onclick="delFile(${i})">🗑</div>
+      </div>`).join('') +
+      `<div class="sub muted" style="padding-top:12px">전부 ${(total/1024).toFixed(1)} GB 차지하고 있습니다</div>` :
       '<div class="empty">{{DEVICE}}에 저장된 영상이 여기에 나타납니다</div>';
 
     const {jobs} = await api('/api/jobs');
@@ -383,6 +391,21 @@ function setPace(id){
 async function action(){
   if (state.view === 'opt') return startJob();
   if (state.view === 'edit') return replan();
+}
+
+async function delFile(i){
+  const f = (state.fileList||[])[i];
+  if (!f) return;
+  const size = f.size_mb >= 1024 ? (f.size_mb/1024).toFixed(1)+' GB' : f.size_mb+' MB';
+  if (!confirm(`${f.name}\n${size}\n\n이 영상을 폰에서 지웁니다.\n되돌릴 수 없습니다. 지울까요?`)) return;
+  try{
+    const r = await api('/api/files/delete', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({path: f.path})
+    });
+    toast(`${r.name} 지웠습니다 (${r.freed_mb} MB 확보)`);
+    refresh();
+  } catch(e){ if (e) toast(e.message); }
 }
 
 async function startJob(){
