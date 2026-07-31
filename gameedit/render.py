@@ -17,9 +17,14 @@ from .media import FFmpegError, ffmpeg_bin, run
 from .models import EditPlan, MemeCue
 
 Logger = Callable[[str], None]
+Progress = Callable[[str, float], None]
 
 
 def _noop(_msg: str) -> None:
+    pass
+
+
+def _noop_progress(_label: str, _fraction: float) -> None:
     pass
 
 
@@ -270,7 +275,8 @@ def build_render_job(plan: EditPlan, config, ass_path: Path | None, output: Path
 
 
 def render(plan: EditPlan, config, ass_path: Path | None, output: Path, work_dir: Path,
-           *, dry_run: bool = False, skip_cut: bool = False, log: Logger = _noop) -> RenderJob:
+           *, dry_run: bool = False, skip_cut: bool = False, log: Logger = _noop,
+           progress: Progress = _noop_progress) -> RenderJob:
     if not plan.clips:
         raise FFmpegError("편집 계획에 클립이 없습니다. 하이라이트 설정을 확인하세요.")
     job = build_render_job(plan, config, ass_path, output, work_dir)
@@ -283,12 +289,15 @@ def render(plan: EditPlan, config, ass_path: Path | None, output: Path, work_dir
     if skip_cut and job.intermediate and job.intermediate.exists():
         log(f"1/2 컷 편집 건너뜀 (기존 {job.intermediate.name} 사용)")
     else:
+        progress("컷 편집", 0.0)
         log(f"1/2 하이라이트 {len(plan.clips)}개 컷 편집 중… → {job.intermediate}")
         run(job.cut_cmd, capture=True)
 
+    progress("밈·자막 합성", 0.55)
     log(f"2/2 밈·자막 합성 중… → {output}")
     run(job.dress_cmd, capture=True)
 
+    progress("완료", 1.0)
     if not config.get("render.keep_intermediate", False) and job.intermediate:
         try:
             job.intermediate.unlink(missing_ok=True)

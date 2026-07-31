@@ -242,6 +242,35 @@ class EditPlan:
                 return clip.to_out(source_t)
         return None
 
+    def remap_cues(self) -> None:
+        """클립을 지우거나 순서를 바꾼 뒤 밈·자막을 다시 붙인다.
+
+        큐는 결과물 시각을 들고 있어서, 앞쪽 클립이 하나 빠지면 뒤가 전부 밀린다.
+        각 큐가 기억하고 있는 원본 시각(source_start)을 기준으로 다시 계산하고,
+        잘려나간 구간에 있던 큐는 버린다.
+        """
+        self.relayout()
+
+        memes: list[MemeCue] = []
+        for cue in self.memes:
+            mapped = self.map_time(cue.source_start)
+            if mapped is None:
+                continue
+            cue.start = round(mapped, 3)
+            memes.append(cue)
+        self.memes = sorted(memes, key=lambda c: c.start)
+
+        subtitles: list[SubtitleCue] = []
+        for sub in self.subtitles:
+            mapped = self.map_time(sub.source_start)
+            if mapped is None:
+                continue
+            duration = sub.duration
+            sub.start = round(mapped, 3)
+            sub.end = round(mapped + duration, 3)
+            subtitles.append(sub)
+        self.subtitles = sorted(subtitles, key=lambda c: c.start)
+
     def map_range(self, start: float, end: float) -> tuple[float, float] | None:
         """원본 구간 → 결과물 구간. 한 클립 안에 들어가는 부분만 살린다."""
         for clip in self.clips:

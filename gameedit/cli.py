@@ -312,6 +312,17 @@ def cmd_auto(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    from .server import serve
+
+    config = load_config(args)
+    serve(config, host=args.host, port=args.port,
+          root=Path(args.work) if args.work else None,
+          access_key="" if args.no_key else args.key,
+          watch_dirs=args.watch or [], log=log)
+    return 0
+
+
 def cmd_packs(args) -> int:
     config = load_config(args)
     meme_cfg = config.section("memes")
@@ -476,6 +487,16 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     _add_edit_options(p)
     p.set_defaults(func=cmd_auto)
+
+    p = sub.add_parser("serve", help="폰에서 쓰는 웹 UI 서버 실행")
+    p.add_argument("-p", "--port", type=int, default=8000, help="포트 (기본 8000)")
+    p.add_argument("--host", default="0.0.0.0", help="바인딩 주소 (기본 0.0.0.0)")
+    p.add_argument("--key", help="접속 번호 (기본: 실행할 때마다 4자리 자동 생성)")
+    p.add_argument("--no-key", action="store_true", help="접속 번호 없이 열기 (집 네트워크 전용)")
+    p.add_argument("--watch", action="append", metavar="폴더",
+                   help="폰에서 고를 수 있게 보여줄 영상 폴더 (여러 번 지정 가능)")
+    _add_common(p)
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("packs", help="사용 중인 밈 목록 보기")
     p.add_argument("--missing", action="store_true",

@@ -1,0 +1,446 @@
+"""폰 브라우저에서 열리는 화면 (HTML 한 장).
+
+앱 설치 없이 아이폰·안드로이드 모두에서 쓰려고 순수 HTML/CSS/JS 로 만들었다.
+외부 라이브러리를 전혀 쓰지 않아서 인터넷 없이 집 와이파이만으로 동작한다.
+"""
+
+PAGE = r"""<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1017">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>게임 하이라이트 편집기</title>
+<style>
+:root{
+  --bg:#0d1017; --card:#161b26; --line:#232a38; --text:#e6e9ef; --dim:#8b95a8;
+  --accent:#58a6ff; --accent2:#1f6feb; --good:#3fb950; --warn:#d29922; --bad:#f85149;
+  color-scheme: dark;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Pretendard',
+              'Noto Sans KR',system-ui,sans-serif;
+  padding:0 0 calc(88px + env(safe-area-inset-bottom));
+  -webkit-text-size-adjust:100%;
+}
+header{
+  position:sticky; top:0; z-index:20; background:rgba(13,16,23,.94);
+  backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  padding:calc(14px + env(safe-area-inset-top)) 18px 14px;
+  display:flex; align-items:center; gap:10px;
+}
+header h1{font-size:17px; margin:0; flex:1}
+header button{background:none;border:none;color:var(--accent);font-size:15px;padding:6px}
+main{padding:18px}
+.view{display:none} .view.on{display:block}
+h2{font-size:15px; color:var(--dim); margin:26px 0 10px; font-weight:600}
+h2:first-child{margin-top:6px}
+.card{background:var(--card); border:1px solid var(--line); border-radius:14px;
+      padding:16px; margin-bottom:12px}
+.btn{
+  display:flex; align-items:center; justify-content:center; gap:8px; width:100%;
+  padding:17px; border-radius:14px; border:none; background:var(--accent2); color:#fff;
+  font-size:17px; font-weight:600; font-family:inherit; cursor:pointer;
+}
+.btn:disabled{opacity:.45}
+.btn.ghost{background:var(--card); border:1px solid var(--line); color:var(--text)}
+.btn.danger{background:#3a1d1d; color:#ff9b95; border:1px solid #5a2a2a}
+.btn+.btn{margin-top:10px}
+.chips{display:flex; gap:8px; flex-wrap:wrap}
+.chip{
+  flex:1; min-width:72px; text-align:center; padding:14px 10px; border-radius:12px;
+  background:var(--card); border:1px solid var(--line); color:var(--dim); font-size:15px;
+}
+.chip.on{background:rgba(88,166,255,.16); border-color:var(--accent); color:var(--accent)}
+.row{display:flex; align-items:center; justify-content:space-between; gap:12px;
+     padding:14px 0; border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.row .label{font-size:15px}
+.row .sub{font-size:12px; color:var(--dim); margin-top:3px}
+.switch{width:52px; height:31px; border-radius:99px; background:#2b3242; position:relative;
+        flex:none; transition:background .15s}
+.switch.on{background:var(--good)}
+.switch i{position:absolute; top:3px; left:3px; width:25px; height:25px; border-radius:50%;
+          background:#fff; transition:transform .15s}
+.switch.on i{transform:translateX(21px)}
+.bar{height:8px; border-radius:99px; background:#232a38; overflow:hidden; margin:12px 0 8px}
+.bar i{display:block; height:100%; background:linear-gradient(90deg,var(--accent2),var(--accent));
+       width:0; transition:width .4s}
+.muted{color:var(--dim); font-size:13px; line-height:1.6}
+.job{display:flex; gap:12px; align-items:center; padding:14px 0; border-bottom:1px solid var(--line)}
+.job:last-child{border-bottom:none}
+.job .dot{width:10px; height:10px; border-radius:50%; flex:none; background:var(--dim)}
+.dot.running{background:var(--warn); animation:pulse 1.2s infinite}
+.dot.done{background:var(--good)} .dot.error{background:var(--bad)}
+@keyframes pulse{50%{opacity:.3}}
+.job .grow{flex:1; min-width:0}
+.job .name{font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.clip{display:flex; gap:12px; align-items:center; padding:10px 0;
+      border-bottom:1px solid var(--line)}
+.clip img{width:104px; height:59px; border-radius:8px; object-fit:cover; background:#0a0d13; flex:none}
+.clip .grow{flex:1; min-width:0}
+.clip .t{font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.clip .m{font-size:12px; color:var(--dim); margin-top:4px}
+.clip.off{opacity:.35}
+.check{width:30px; height:30px; border-radius:9px; border:2px solid var(--line); flex:none;
+       display:flex; align-items:center; justify-content:center; font-size:16px; color:transparent}
+.check.on{background:var(--accent2); border-color:var(--accent2); color:#fff}
+textarea,input[type=text]{
+  width:100%; background:#0f131b; color:var(--text); border:1px solid var(--line);
+  border-radius:10px; padding:12px; font-size:16px; font-family:inherit; resize:vertical;
+}
+video{width:100%; border-radius:12px; background:#000; margin-top:4px}
+.log{background:#0a0d13; border-radius:10px; padding:12px; font-size:11px; color:var(--dim);
+     max-height:190px; overflow:auto; white-space:pre-wrap; line-height:1.55;
+     font-family:ui-monospace,Menlo,monospace}
+.bottom{position:fixed; left:0; right:0; bottom:0; z-index:30; padding:12px 18px
+        calc(12px + env(safe-area-inset-bottom)); background:rgba(13,16,23,.96);
+        backdrop-filter:blur(12px); border-top:1px solid var(--line)}
+.toast{position:fixed; left:50%; bottom:96px; transform:translateX(-50%); z-index:50;
+       background:#1f2633; border:1px solid var(--line); border-radius:12px; padding:12px 18px;
+       font-size:14px; opacity:0; pointer-events:none; transition:opacity .25s; max-width:88%}
+.toast.on{opacity:1}
+.empty{text-align:center; color:var(--dim); padding:34px 10px; font-size:14px; line-height:1.7}
+</style>
+</head>
+<body>
+
+<header>
+  <button id="back" style="display:none" onclick="go('home')">‹ 뒤로</button>
+  <h1 id="title">🎮 하이라이트 편집기</h1>
+  <button onclick="refresh()">새로고침</button>
+</header>
+
+<main>
+  <!-- ============ 홈 ============ -->
+  <section id="v-home" class="view on">
+    <h2>새로 편집하기</h2>
+    <div class="card">
+      <input type="file" id="file" accept="video/*" style="display:none" onchange="pick(this)">
+      <button class="btn" onclick="document.getElementById('file').click()">
+        📤 폰에서 영상 올리기
+      </button>
+      <div id="up" style="display:none">
+        <div class="bar"><i id="upbar"></i></div>
+        <div class="muted" id="uptext">올리는 중…</div>
+      </div>
+      <div class="muted" style="margin-top:12px">
+        큰 영상은 와이파이로 올리세요. 컴퓨터에 이미 있는 영상은 아래에서 고르면 올릴 필요가 없습니다.
+      </div>
+    </div>
+
+    <h2>컴퓨터에 있는 영상</h2>
+    <div class="card" id="files"><div class="empty">불러오는 중…</div></div>
+
+    <h2>작업 목록</h2>
+    <div class="card" id="jobs"><div class="empty">아직 편집한 영상이 없습니다</div></div>
+  </section>
+
+  <!-- ============ 옵션 ============ -->
+  <section id="v-opt" class="view">
+    <div class="card">
+      <div class="label" id="opt-name" style="font-size:15px"></div>
+      <div class="sub muted" id="opt-size" style="margin-top:4px"></div>
+    </div>
+
+    <h2>완성본 길이</h2>
+    <div class="chips" id="lens"></div>
+
+    <h2>편집 옵션</h2>
+    <div class="card">
+      <div class="row">
+        <div><div class="label">밈 넣기</div>
+             <div class="sub">대사·상황에 맞는 자막 밈</div></div>
+        <div class="switch on" id="sw-meme" onclick="toggle(this)"><i></i></div>
+      </div>
+      <div class="row">
+        <div><div class="label">대사 자막</div>
+             <div class="sub">음성 인식이 설치돼 있을 때만</div></div>
+        <div class="switch on" id="sw-sub" onclick="toggle(this)"><i></i></div>
+      </div>
+      <div class="row">
+        <div><div class="label">쇼츠(세로) 로 만들기</div>
+             <div class="sub">1080x1920 세로 영상</div></div>
+        <div class="switch" id="sw-shorts" onclick="toggle(this)"><i></i></div>
+      </div>
+    </div>
+    <div class="muted">편집이 시작되면 폰을 꺼도 됩니다. 컴퓨터가 알아서 만듭니다.</div>
+  </section>
+
+  <!-- ============ 작업 상세 ============ -->
+  <section id="v-job" class="view">
+    <div class="card">
+      <div id="job-step" style="font-size:16px">준비 중…</div>
+      <div class="bar"><i id="job-bar"></i></div>
+      <div class="muted" id="job-sum"></div>
+    </div>
+    <div id="job-result" style="display:none">
+      <h2>미리보기</h2>
+      <video id="job-video" controls playsinline preload="metadata"></video>
+      <div style="margin-top:12px">
+        <button class="btn" onclick="download()">⬇️ 폰에 저장하기</button>
+        <button class="btn ghost" onclick="openEdit()">✂️ 클립·자막 고치기</button>
+      </div>
+    </div>
+    <h2>진행 기록</h2>
+    <div class="log" id="job-log"></div>
+  </section>
+
+  <!-- ============ 편집 ============ -->
+  <section id="v-edit" class="view">
+    <div class="card">
+      <div class="muted">빼고 싶은 장면을 체크 해제하세요. 자막은 눌러서 고칠 수 있습니다.</div>
+    </div>
+    <h2>하이라이트 <span id="clip-count" class="muted"></span></h2>
+    <div class="card" id="clips"></div>
+    <h2>자막</h2>
+    <div class="card" id="subs"></div>
+  </section>
+</main>
+
+<div class="bottom" id="bottom" style="display:none">
+  <button class="btn" id="action" onclick="action()">시작</button>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const KEY = (new URLSearchParams(location.search).get('k')) ||
+            localStorage.getItem('gameedit_key') || '';
+if (KEY) localStorage.setItem('gameedit_key', KEY);
+
+let state = {view:'home', file:null, job:null, plan:null,
+             removed:new Set(), edits:{}, target:10, timer:null};
+
+const $ = (id) => document.getElementById(id);
+
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('on'), 2600);
+}
+
+async function api(path, opts={}){
+  opts.headers = Object.assign({'X-Key':KEY}, opts.headers||{});
+  const res = await fetch(path, opts);
+  if (res.status === 401){ toast('접속 번호가 필요합니다. 컴퓨터 화면의 주소로 다시 접속하세요'); throw 0; }
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.error || '오류가 발생했습니다');
+  return data;
+}
+
+function go(view){
+  state.view = view;
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+  $('v-'+view).classList.add('on');
+  $('back').style.display = view === 'home' ? 'none' : 'block';
+  const titles = {home:'🎮 하이라이트 편집기', opt:'편집 설정', job:'편집 진행', edit:'다시 고르기'};
+  $('title').textContent = titles[view];
+  const bottom = {opt:'✨ 편집 시작', edit:'🔄 이대로 다시 만들기'};
+  if (bottom[view]){ $('bottom').style.display='block'; $('action').textContent = bottom[view]; }
+  else $('bottom').style.display='none';
+  window.scrollTo(0,0);
+  if (view === 'home') refresh();
+}
+$('back').onclick = () => go(state.view === 'edit' ? 'job' : 'home');
+
+function toggle(el){ el.classList.toggle('on'); }
+
+/* ---------------- 업로드 ---------------- */
+function pick(input){
+  const file = input.files[0];
+  if (!file) return;
+  $('up').style.display = 'block';
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  xhr.setRequestHeader('X-Key', KEY);
+  xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    const pct = e.loaded / e.total * 100;
+    $('upbar').style.width = pct + '%';
+    $('uptext').textContent = `올리는 중… ${pct.toFixed(0)}% ` +
+      `(${(e.loaded/1048576).toFixed(0)} / ${(e.total/1048576).toFixed(0)} MB)`;
+  };
+  xhr.onload = () => {
+    $('up').style.display = 'none'; $('upbar').style.width = '0';
+    input.value = '';
+    let data = {};
+    try { data = JSON.parse(xhr.responseText); } catch(e){}
+    if (xhr.status >= 400){ toast(data.error || '업로드 실패'); return; }
+    openOptions({path:data.path, name:data.name, size_mb:(file.size/1048576).toFixed(0)});
+  };
+  xhr.onerror = () => { $('up').style.display='none'; toast('업로드 중 연결이 끊겼습니다'); };
+  xhr.send(file);
+}
+
+/* ---------------- 목록 ---------------- */
+async function refresh(){
+  try {
+    const {files} = await api('/api/files');
+    $('files').innerHTML = files.length ? files.map(f => `
+      <div class="row" onclick='openOptions(${JSON.stringify(f).replace(/'/g,"&#39;")})'>
+        <div class="grow"><div class="label">🎬 ${esc(f.name)}</div>
+        <div class="sub">${f.size_mb} MB</div></div><div class="muted">›</div>
+      </div>`).join('') :
+      '<div class="empty">컴퓨터의 uploads 폴더에 영상을 넣어두면<br>여기에 나타납니다</div>';
+
+    const {jobs} = await api('/api/jobs');
+    $('jobs').innerHTML = jobs.length ? jobs.map(j => `
+      <div class="job" onclick="openJob('${j.id}')">
+        <div class="dot ${j.status}"></div>
+        <div class="grow"><div class="name">${esc(j.title)}</div>
+        <div class="sub muted">${statusText(j)}</div></div>
+        <div class="muted">›</div>
+      </div>`).join('') : '<div class="empty">아직 편집한 영상이 없습니다</div>';
+  } catch(e){}
+}
+
+function statusText(j){
+  if (j.status === 'done') return `완료 · ${j.summary.duration_text||''} · 하이라이트 ${j.summary.clips||0}개`;
+  if (j.status === 'error') return '실패: ' + (j.error||'');
+  return `${j.step} · ${Math.round(j.progress*100)}%`;
+}
+const esc = (s) => String(s||'').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+
+/* ---------------- 옵션 ---------------- */
+const LENGTHS = [3,5,10,15,20];
+function openOptions(file){
+  state.file = file;
+  $('opt-name').textContent = '🎬 ' + file.name;
+  $('opt-size').textContent = file.size_mb ? file.size_mb + ' MB' : '';
+  $('lens').innerHTML = LENGTHS.map(n =>
+    `<div class="chip ${n===state.target?'on':''}" onclick="setLen(${n})">${n}분</div>`).join('');
+  go('opt');
+}
+function setLen(n){
+  state.target = n;
+  document.querySelectorAll('#lens .chip').forEach((c,i) =>
+    c.classList.toggle('on', LENGTHS[i]===n));
+}
+
+async function action(){
+  if (state.view === 'opt') return startJob();
+  if (state.view === 'edit') return replan();
+}
+
+async function startJob(){
+  $('action').disabled = true;
+  try{
+    const job = await api('/api/jobs', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        path: state.file.path,
+        target_duration: state.target * 60,
+        no_memes: !$('sw-meme').classList.contains('on'),
+        no_subtitles: !$('sw-sub').classList.contains('on'),
+        shorts: $('sw-shorts').classList.contains('on'),
+      })
+    });
+    openJob(job.id);
+  } catch(e){ if (e) toast(e.message); }
+  $('action').disabled = false;
+}
+
+/* ---------------- 작업 상세 ---------------- */
+function openJob(id){
+  state.job = id;
+  $('job-result').style.display = 'none';
+  go('job');
+  poll();
+}
+
+async function poll(){
+  clearTimeout(state.timer);
+  if (state.view !== 'job' || !state.job) return;
+  try{
+    const j = await api('/api/jobs/' + state.job);
+    $('job-step').textContent =
+      j.status==='done' ? '✅ 완성됐습니다' :
+      j.status==='error' ? '❌ ' + (j.error||'실패') : j.step;
+    $('job-bar').style.width = (j.progress*100) + '%';
+    $('job-sum').textContent = j.status==='done' && j.summary.clips ?
+      `${j.summary.source_duration_text} → ${j.summary.duration_text} · ` +
+      `하이라이트 ${j.summary.clips}개 · 밈 ${j.summary.memes}개 · 자막 ${j.summary.subtitles}줄` : '';
+    $('job-log').textContent = (j.log||[]).join('\n');
+    $('job-log').scrollTop = 1e6;
+
+    if (j.status === 'done' && j.has_output){
+      const v = $('job-video');
+      const src = `/api/jobs/${j.id}/video?k=${encodeURIComponent(KEY)}`;
+      if (v.getAttribute('src') !== src) v.setAttribute('src', src);
+      $('job-result').style.display = 'block';
+    }
+    if (j.status === 'running' || j.status === 'queued')
+      state.timer = setTimeout(poll, 2000);
+  } catch(e){ state.timer = setTimeout(poll, 5000); }
+}
+
+function download(){
+  location.href = `/api/jobs/${state.job}/video?download=1&k=${encodeURIComponent(KEY)}`;
+}
+
+/* ---------------- 편집 ---------------- */
+async function openEdit(){
+  try{
+    state.plan = await api(`/api/jobs/${state.job}/plan`);
+    state.removed = new Set(); state.edits = {};
+    renderEdit();
+    go('edit');
+  } catch(e){ if (e) toast(e.message); }
+}
+
+function renderEdit(){
+  const p = state.plan;
+  $('clip-count').textContent = `(${p.clips.length - state.removed.size}/${p.clips.length}개 사용)`;
+  $('clips').innerHTML = p.clips.map(c => `
+    <div class="clip ${state.removed.has(c.index)?'off':''}" onclick="toggleClip(${c.index})">
+      <div class="check ${state.removed.has(c.index)?'':'on'}">✓</div>
+      <img loading="lazy" src="/api/jobs/${state.job}/thumb/${c.index}?k=${encodeURIComponent(KEY)}"
+           onerror="this.style.visibility='hidden'">
+      <div class="grow">
+        <div class="t">${esc(c.label)}</div>
+        <div class="m">원본 ${c.start_text} · ${c.duration}초</div>
+      </div>
+    </div>`).join('') || '<div class="empty">하이라이트가 없습니다</div>';
+
+  $('subs').innerHTML = p.subtitles.length ? p.subtitles.map(s => `
+    <div class="row" style="display:block">
+      <div class="m muted">${s.start_text}</div>
+      <textarea rows="1" oninput="editSub(${s.index}, this.value)">${esc(s.text)}</textarea>
+    </div>`).join('') :
+    '<div class="empty">자막이 없습니다<br>(음성 인식을 설치하면 대사 자막이 생깁니다)</div>';
+}
+
+function toggleClip(i){
+  if (state.removed.has(i)) state.removed.delete(i); else state.removed.add(i);
+  renderEdit();
+}
+function editSub(i, text){ state.edits[i] = text; }
+
+async function replan(){
+  if (state.removed.size >= state.plan.clips.length){ toast('클립을 최소 하나는 남겨 주세요'); return; }
+  $('action').disabled = true;
+  try{
+    await api(`/api/jobs/${state.job}/replan`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        removed_clips:[...state.removed],
+        subtitle_edits: state.edits,
+      })
+    });
+    toast('다시 만들고 있습니다');
+    go('job'); poll();
+  } catch(e){ if (e) toast(e.message); }
+  $('action').disabled = false;
+}
+
+refresh();
+setInterval(() => { if (state.view === 'home') refresh(); }, 5000);
+</script>
+</body>
+</html>
+"""
+
+__all__ = ["PAGE"]
