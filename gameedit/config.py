@@ -75,7 +75,8 @@ DEFAULTS: dict[str, Any] = {
     },
     "subtitles": {
         "enabled": True,
-        "font": "Noto Sans CJK KR",
+        "font": "Noto Sans KR",
+        "font_fallback": True,  # 이 폰트가 없으면 설치된 한글 폰트로 자동 대체
         "font_size": 62,
         "bold": True,
         "primary_color": "&H00FFFFFF",

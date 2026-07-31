@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .fonts import resolve_font
 from .models import Analysis, EditPlan, MemeCue, SubtitleCue, Segment
 
 _ALIGN = {
@@ -201,6 +202,8 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
               *, width: int = 1920, height: int = 1080) -> str:
     width, height = reference_resolution(width, height)
     font = cfg.get("font", "Noto Sans CJK KR")
+    if cfg.get("font_fallback", True):
+        font = resolve_font(font)
     size = int(cfg.get("font_size", 62))
     bold = -1 if cfg.get("bold", True) else 0
     primary = cfg.get("primary_color", "&H00FFFFFF")

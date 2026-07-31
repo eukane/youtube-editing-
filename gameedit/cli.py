@@ -10,6 +10,7 @@ from pathlib import Path
 from . import __version__
 from .analyze import analyze_video
 from .config import Config
+from .fonts import installed_korean_fonts, resolve_font
 from .media import FFmpegError, find_binary, format_timecode
 from .memes import (AUDIO_EXTS, BUILTIN_PACK_DIR, IMAGE_EXTS, VIDEO_EXTS, load_packs,
                     missing_assets)
@@ -186,12 +187,12 @@ def cmd_doctor(args) -> int:
 
     config = load_config(args)
     font = config.get("subtitles.font", "Noto Sans CJK KR")
-    installed = korean_fonts()
+    installed = list(installed_korean_fonts())
     if installed:
         mark = "✓" if any(font.lower() in f.lower() for f in installed) else "△"
         log(f"한글 폰트 : {mark} 설치된 한글 폰트 {len(installed)}개 (설정값: {font})")
         if mark == "△":
-            log(f"  · '{font}' 를 못 찾으면 다른 폰트로 대체됩니다. 후보: {', '.join(installed[:3])}")
+            log(f"  · '{font}' 가 없어서 '{resolve_font(font)}' 로 대체됩니다.")
     else:
         log("한글 폰트 : △ 확인 불가 (fc-list 없음). 자막이 □□□ 로 나오면 Noto Sans KR 을 설치하세요.")
 
@@ -201,27 +202,6 @@ def cmd_doctor(args) -> int:
     if missing:
         log(f"  · 파일이 없는 에셋 {len(missing)}개 (텍스트로 대체되거나 무시됩니다)")
     return 0 if ok else 1
-
-
-def korean_fonts() -> list[str]:
-    """시스템에 설치된 한글 지원 폰트 이름 목록 (fc-list 이용, 없으면 빈 목록)."""
-    import shutil
-    import subprocess
-
-    if not shutil.which("fc-list"):
-        return []
-    try:
-        proc = subprocess.run(["fc-list", ":lang=ko", "family"], capture_output=True,
-                              text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    names: list[str] = []
-    for line in (proc.stdout or "").splitlines():
-        for name in line.split(","):
-            name = name.strip()
-            if name and name not in names:
-                names.append(name)
-    return names
 
 
 def cmd_analyze(args) -> int:

@@ -20,6 +20,9 @@
 
 ---
 
+> **깃허브·명령줄이 처음이시라면** → [처음 실행하기 (윈도우 기준)](docs/처음-실행하기.md)
+> 문서를 먼저 보세요. 파이썬 설치부터 한 단계씩 안내합니다.
+
 ## 설치
 
 ```bash
@@ -243,8 +246,15 @@ gameedit plan --set memes.max_per_minute=6 --set highlight.weights.audio=1.5
 ## 자주 겪는 문제
 
 **자막이 □□□ 로 나옵니다**
-한글 폰트가 없습니다. Noto Sans KR 을 설치하고 `subtitles.font` 를 설치된 이름으로
-맞춰 주세요. `gameedit doctor` 가 설치된 한글 폰트를 알려줍니다.
+한글 폰트 문제입니다. 설정한 폰트가 없으면 설치된 한글 폰트로 자동 대체하지만,
+윈도우·맥에서는 폰트 목록을 조회할 수 없어 직접 지정해야 할 수 있습니다.
+
+```bash
+gameedit render --set subtitles.font="맑은 고딕"          # 윈도우
+gameedit render --set subtitles.font="Apple SD Gothic Neo"  # 맥
+```
+
+`gameedit doctor` 가 지금 어떤 폰트가 쓰이는지 알려줍니다.
 
 **분석이 너무 오래 걸립니다**
 장면 검출과 음성 인식이 대부분입니다. 음성 인식은 GPU가 있으면 훨씬 빠르고
