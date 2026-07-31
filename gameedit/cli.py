@@ -1,0 +1,445 @@
+"""gameedit 명령줄 인터페이스."""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+from . import __version__
+from .analyze import analyze_video
+from .config import Config
+from .media import FFmpegError, find_binary, format_timecode
+from .memes import BUILTIN_PACK_DIR, load_packs, missing_assets
+from .models import Analysis, EditPlan, analysis_from_dict, load_json, save_json
+from .plan import build_plan, load_plan
+from .render import render
+from .srt import write_srt
+from .subtitles import write_ass
+from .timeline import write_html
+
+DURATION_RE = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s?)?$", re.IGNORECASE)
+
+
+def log(msg: str = "") -> None:
+    try:
+        print(msg, flush=True)
+    except BrokenPipeError:  # `| head` 처럼 파이프가 먼저 닫힌 경우
+        raise SystemExit(0)
+
+
+def parse_duration(text: str) -> float:
+    """'8m', '1h20m', '00:08:30', '480' 을 초로 변환."""
+    text = str(text).strip()
+    if not text:
+        raise ValueError("빈 길이 값")
+    if ":" in text:
+        parts = [float(p) for p in text.split(":")]
+        seconds = 0.0
+        for part in parts:
+            seconds = seconds * 60 + part
+        return seconds
+    m = DURATION_RE.match(text)
+    if not m or not any(m.groups()):
+        raise ValueError(f"길이 형식을 이해할 수 없습니다: {text}")
+    hours, minutes, seconds = m.groups()
+    return (float(hours or 0) * 3600 + float(minutes or 0) * 60 + float(seconds or 0))
+
+
+# --------------------------------------------------------------------------
+# 공통 헬퍼
+# --------------------------------------------------------------------------
+
+
+def load_config(args) -> Config:
+    if getattr(args, "config", None):
+        config = Config.load(args.config)
+    else:
+        config = Config.discover(Path.cwd())
+    for override in getattr(args, "set", None) or []:
+        if "=" not in override:
+            raise SystemExit(f"--set 형식이 잘못됐습니다 (key=value): {override}")
+        key, _, value = override.partition("=")
+        config.set(key.strip(), _coerce(value.strip()))
+    if getattr(args, "target", None):
+        config.set("highlight.target_duration", parse_duration(args.target))
+    if getattr(args, "subs", None):
+        config.set("transcribe.external", str(args.subs))
+        config.set("transcribe.backend", "external")
+    if getattr(args, "no_memes", False):
+        config.set("memes.enabled", False)
+    if getattr(args, "no_subtitles", False):
+        config.set("subtitles.enabled", False)
+    return config
+
+
+def _coerce(value: str):
+    low = value.lower()
+    if low in ("true", "yes", "on"):
+        return True
+    if low in ("false", "no", "off"):
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    return value
+
+
+def resolve_work_dir(config: Config, args, source: str | None = None) -> Path:
+    if getattr(args, "work", None):
+        return Path(args.work)
+    base = Path(config.get("project.work_dir", "work"))
+    if source:
+        return base / Path(source).stem
+    # 소스가 없으면 work 아래 폴더가 하나뿐일 때 그것을 사용
+    if base.is_dir():
+        candidates = [p for p in sorted(base.iterdir()) if (p / "analysis.json").exists()
+                      or (p / "plan.json").exists()]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            names = ", ".join(p.name for p in candidates)
+            raise SystemExit(f"작업 폴더가 여러 개입니다. --work 로 지정하세요: {names}")
+    return base
+
+
+def load_analysis(work_dir: Path) -> Analysis:
+    path = work_dir / "analysis.json"
+    if not path.exists():
+        raise SystemExit(f"분석 결과가 없습니다: {path}\n먼저 `gameedit analyze <영상>` 을 실행하세요.")
+    return analysis_from_dict(load_json(path))
+
+
+def write_plan_outputs(plan: EditPlan, analysis: Analysis | None, config: Config,
+                       work_dir: Path) -> dict[str, Path]:
+    outputs: dict[str, Path] = {}
+    outputs["plan"] = save_json(plan, work_dir / "plan.json")
+
+    sub_cfg = config.section("subtitles")
+    width = plan.media.width or 1920
+    height = plan.media.height or 1080
+    resolution = (config.get("project.resolution") or "").lower()
+    if "x" in resolution:
+        try:
+            w, h = resolution.split("x")
+            width, height = int(w), int(h)
+        except ValueError:
+            pass
+
+    if sub_cfg.get("enabled", True) or plan.memes:
+        outputs["ass"] = write_ass(work_dir / "subtitles.ass", plan.subtitles, plan.memes,
+                                   sub_cfg, width=width, height=height)
+    if sub_cfg.get("export_srt", True) and plan.subtitles:
+        outputs["srt"] = write_srt(plan.subtitles, work_dir / "subtitles.srt")
+    outputs["html"] = write_html(work_dir / "plan.html", plan, analysis,
+                                 title=config.get("project.name", "게임 하이라이트"))
+    return outputs
+
+
+# --------------------------------------------------------------------------
+# 명령 구현
+# --------------------------------------------------------------------------
+
+
+def cmd_init(args) -> int:
+    target = Path(args.directory or ".")
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / "gameedit.yaml"
+    if path.exists() and not args.force:
+        log(f"이미 존재합니다: {path} (덮어쓰려면 --force)")
+        return 1
+    config = Config()
+    header = (
+        "# gameedit 설정 파일\n"
+        "# 값은 전부 선택 사항입니다. 지운 항목은 기본값이 적용됩니다.\n"
+        "# 자세한 설명: README.md\n\n"
+    )
+    path.write_text(header + config.dump_yaml(), encoding="utf-8")
+    log(f"설정 파일 생성: {path}")
+    log("다음 단계:  gameedit auto <영상파일>")
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    ok = True
+    ffmpeg = find_binary("ffmpeg")
+    ffprobe = find_binary("ffprobe")
+    log(f"ffmpeg  : {ffmpeg or '✗ 없음 (필수)'}")
+    log(f"ffprobe : {ffprobe or '△ 없음 (ffmpeg 출력 파싱으로 대체)'}")
+    if not ffmpeg:
+        ok = False
+
+    from .transcribe import _module_available, resolve_backend
+
+    backend = resolve_backend("auto")
+    log(f"음성인식 : {backend}"
+        + ("" if backend != "none" else "  → `pip install faster-whisper` 또는 --subs 로 자막 파일 지정"))
+    log(f"  faster-whisper: {'설치됨' if _module_available('faster_whisper') else '없음'}")
+    log(f"  openai-whisper: {'설치됨' if _module_available('whisper') else '없음'}")
+
+    config = load_config(args)
+    font = config.get("subtitles.font", "Noto Sans CJK KR")
+    installed = korean_fonts()
+    if installed:
+        mark = "✓" if any(font.lower() in f.lower() for f in installed) else "△"
+        log(f"한글 폰트 : {mark} 설치된 한글 폰트 {len(installed)}개 (설정값: {font})")
+        if mark == "△":
+            log(f"  · '{font}' 를 못 찾으면 다른 폰트로 대체됩니다. 후보: {', '.join(installed[:3])}")
+    else:
+        log("한글 폰트 : △ 확인 불가 (fc-list 없음). 자막이 □□□ 로 나오면 Noto Sans KR 을 설치하세요.")
+
+    packs = load_packs(["default"])
+    log(f"기본 밈팩 : {len(packs)}개 밈 ({BUILTIN_PACK_DIR / 'default'})")
+    missing = missing_assets(packs)
+    if missing:
+        log(f"  · 파일이 없는 에셋 {len(missing)}개 (텍스트로 대체되거나 무시됩니다)")
+    return 0 if ok else 1
+
+
+def korean_fonts() -> list[str]:
+    """시스템에 설치된 한글 지원 폰트 이름 목록 (fc-list 이용, 없으면 빈 목록)."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("fc-list"):
+        return []
+    try:
+        proc = subprocess.run(["fc-list", ":lang=ko", "family"], capture_output=True,
+                              text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    names: list[str] = []
+    for line in (proc.stdout or "").splitlines():
+        for name in line.split(","):
+            name = name.strip()
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
+def cmd_analyze(args) -> int:
+    config = load_config(args)
+    work_dir = resolve_work_dir(config, args, args.video)
+    analysis = analyze_video(args.video, config, work_dir, log=log,
+                             keep_audio=args.keep_audio, skip_transcribe=args.no_transcribe)
+    path = save_json(analysis, work_dir / "analysis.json")
+    log(f"\n분석 저장: {path}")
+    return 0
+
+
+def cmd_plan(args) -> int:
+    config = load_config(args)
+    work_dir = resolve_work_dir(config, args, getattr(args, "video", None))
+    analysis = load_analysis(work_dir)
+    plan = build_plan(analysis, config)
+    outputs = write_plan_outputs(plan, analysis, config, work_dir)
+    _print_plan_summary(plan, outputs)
+    return 0
+
+
+def _print_plan_summary(plan: EditPlan, outputs: dict[str, Path]) -> None:
+    log("")
+    log(f"하이라이트 {len(plan.clips)}개 · 밈 {len(plan.memes)}개 · 자막 {len(plan.subtitles)}줄")
+    log(f"원본 {format_timecode(plan.media.duration)} → 편집본 {format_timecode(plan.duration)}")
+    for i, clip in enumerate(plan.clips[:12], start=1):
+        log(f"  {i:2d}. {format_timecode(clip.source_start)}–{format_timecode(clip.source_end)}"
+            f"  {clip.duration:5.1f}s  {clip.label}  (점수 {clip.score:.2f})")
+    if len(plan.clips) > 12:
+        log(f"  … 외 {len(plan.clips) - 12}개")
+    log("")
+    for key, path in outputs.items():
+        log(f"{key:5s} → {path}")
+    if "html" in outputs:
+        log(f"\n검수: 브라우저로 {outputs['html']} 열기")
+
+
+def cmd_preview(args) -> int:
+    config = load_config(args)
+    work_dir = resolve_work_dir(config, args)
+    plan = load_plan(work_dir / "plan.json")
+    analysis = None
+    if (work_dir / "analysis.json").exists():
+        analysis = load_analysis(work_dir)
+    path = write_html(work_dir / "plan.html", plan, analysis,
+                      title=config.get("project.name", "게임 하이라이트"))
+    log(f"미리보기: {path}")
+    return 0
+
+
+def cmd_render(args) -> int:
+    config = load_config(args)
+    work_dir = resolve_work_dir(config, args)
+    plan_path = work_dir / "plan.json"
+    if not plan_path.exists():
+        raise SystemExit(f"편집 계획이 없습니다: {plan_path}\n먼저 `gameedit plan` 을 실행하세요.")
+    plan = load_plan(plan_path)
+
+    # plan.json 을 손으로 고쳤을 수 있으므로 자막 파일을 다시 만든다
+    sub_cfg = config.section("subtitles")
+    ass_path = None
+    if sub_cfg.get("enabled", True) or plan.memes:
+        width = plan.media.width or 1920
+        height = plan.media.height or 1080
+        ass_path = write_ass(work_dir / "subtitles.ass", plan.subtitles, plan.memes,
+                             sub_cfg, width=width, height=height)
+
+    output = Path(args.output or config.get("project.output", "out/final.mp4"))
+    job = render(plan, config, ass_path, output, work_dir,
+                 dry_run=args.dry_run, skip_cut=args.skip_cut, log=log)
+    if args.dry_run:
+        return 0
+    log(f"\n완성: {job.output}  ({format_timecode(plan.duration)})")
+    return 0
+
+
+def cmd_auto(args) -> int:
+    config = load_config(args)
+    work_dir = resolve_work_dir(config, args, args.video)
+
+    analysis_path = work_dir / "analysis.json"
+    if args.reuse_analysis and analysis_path.exists():
+        log(f"기존 분석 재사용: {analysis_path}")
+        analysis = load_analysis(work_dir)
+    else:
+        analysis = analyze_video(args.video, config, work_dir, log=log,
+                                 keep_audio=args.keep_audio,
+                                 skip_transcribe=args.no_transcribe)
+        save_json(analysis, analysis_path)
+
+    log("\n[편집 계획 수립]")
+    plan = build_plan(analysis, config)
+    outputs = write_plan_outputs(plan, analysis, config, work_dir)
+    _print_plan_summary(plan, outputs)
+
+    if args.plan_only:
+        log("\n--plan-only: 렌더링은 건너뜁니다. 확인 후 `gameedit render` 를 실행하세요.")
+        return 0
+
+    log("\n[렌더링]")
+    output = Path(args.output or config.get("project.output", "out/final.mp4"))
+    job = render(plan, config, outputs.get("ass"), output, work_dir,
+                 dry_run=args.dry_run, log=log)
+    if args.dry_run:
+        return 0
+    log(f"\n완성: {job.output}  ({format_timecode(plan.duration)})")
+    return 0
+
+
+def cmd_packs(args) -> int:
+    config = load_config(args)
+    meme_cfg = config.section("memes")
+    memes = load_packs(meme_cfg.get("packs", ["default"]), meme_cfg.get("pack_dirs", []))
+    log(f"밈 {len(memes)}개")
+    for meme in memes:
+        triggers = ", ".join(meme.triggers[:6]) or (", ".join(meme.events) or "-")
+        asset = meme.resolved_asset()
+        mark = "" if meme.kind == "text" else (" ✓" if asset else " ✗파일없음")
+        log(f"  [{meme.kind:5s}]{mark} {meme.id:16s} {meme.text or Path(meme.asset).name:20s} ← {triggers}")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# 파서
+# --------------------------------------------------------------------------
+
+
+def _add_common(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("-c", "--config", help="설정 파일 경로 (기본: ./gameedit.yaml)")
+    parser.add_argument("-w", "--work", help="작업 폴더 경로")
+    parser.add_argument("--set", action="append", metavar="KEY=VALUE",
+                        help="설정 개별 덮어쓰기 (예: --set highlight.target_duration=600)")
+
+
+def _add_edit_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("-t", "--target", help="최종 목표 길이 (예: 8m, 1h20m, 480)")
+    parser.add_argument("--no-memes", action="store_true", help="밈 삽입 끄기")
+    parser.add_argument("--no-subtitles", action="store_true", help="자막 끄기")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="gameedit",
+        description="게임 실황 풀영상을 하이라이트 + 밈 + 자막이 있는 유튜브용 영상으로 자동 편집합니다.",
+    )
+    parser.add_argument("-V", "--version", action="version", version=f"gameedit {__version__}")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("init", help="설정 파일 생성")
+    p.add_argument("directory", nargs="?", default=".")
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("doctor", help="필요한 도구 설치 상태 점검")
+    _add_common(p)
+    p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("analyze", help="영상 전체 분석 (오디오·장면·대사)")
+    p.add_argument("video")
+    p.add_argument("--subs", help="외부 자막 파일(.srt/.vtt) 사용")
+    p.add_argument("--no-transcribe", action="store_true", help="음성 인식 건너뛰기")
+    p.add_argument("--keep-audio", action="store_true", help="추출한 wav 남기기")
+    _add_common(p)
+    p.set_defaults(func=cmd_analyze)
+
+    p = sub.add_parser("plan", help="분석 결과로 편집 계획 만들기")
+    p.add_argument("video", nargs="?", help="작업 폴더를 찾기 위한 원본 파일명 (선택)")
+    _add_common(p)
+    _add_edit_options(p)
+    p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("preview", help="plan.json 으로 검수용 HTML 다시 만들기")
+    _add_common(p)
+    p.set_defaults(func=cmd_preview)
+
+    p = sub.add_parser("render", help="편집 계획대로 최종 영상 렌더링")
+    p.add_argument("-o", "--output", help="출력 파일 경로")
+    p.add_argument("--dry-run", action="store_true", help="ffmpeg 명령만 출력")
+    p.add_argument("--skip-cut", action="store_true", help="이미 만든 cut.mp4 재사용")
+    _add_common(p)
+    _add_edit_options(p)
+    p.set_defaults(func=cmd_render)
+
+    p = sub.add_parser("auto", help="분석 → 계획 → 렌더링 한 번에")
+    p.add_argument("video")
+    p.add_argument("-o", "--output", help="출력 파일 경로")
+    p.add_argument("--subs", help="외부 자막 파일(.srt/.vtt) 사용")
+    p.add_argument("--no-transcribe", action="store_true")
+    p.add_argument("--keep-audio", action="store_true")
+    p.add_argument("--reuse-analysis", action="store_true", help="기존 analysis.json 재사용")
+    p.add_argument("--plan-only", action="store_true", help="렌더링 없이 계획까지만")
+    p.add_argument("--dry-run", action="store_true")
+    _add_common(p)
+    _add_edit_options(p)
+    p.set_defaults(func=cmd_auto)
+
+    p = sub.add_parser("packs", help="사용 중인 밈 목록 보기")
+    _add_common(p)
+    p.set_defaults(func=cmd_packs)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except FFmpegError as exc:
+        log(f"\n[ffmpeg 오류] {exc}")
+        return 2
+    except (FileNotFoundError, ValueError) as exc:
+        log(f"\n[오류] {exc}")
+        return 2
+    except KeyboardInterrupt:
+        log("\n중단했습니다.")
+        return 130
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

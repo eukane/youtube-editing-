@@ -1,0 +1,202 @@
+name: default
+description: >
+  기본 자막밈 팩. 저작권 이슈가 없도록 텍스트 밈만 들어 있습니다.
+  이미지/영상/효과음 밈을 쓰려면 이 폴더(또는 새 팩 폴더)에 파일을 넣고
+  kind: image / video / audio 와 asset, sfx 경로를 채우면 됩니다.
+
+# duration  : 화면에 떠 있는 시간(초)
+# triggers  : 대사에 이 문자열이 들어가면 발동
+# events    : hype(오디오 피크) / silence(정적) 같은 상황 트리거
+# cooldown  : 같은 밈이 다시 나오기까지 최소 간격(초)
+# weight    : 여러 밈이 동시에 걸릴 때 우선순위
+memes:
+  # ---------------- 사망 / 실패 ----------------
+  - id: death_again
+    kind: text
+    text: "☠️ 또 죽었습니다"
+    triggers: ["죽었", "죽네", "죽음", "사망", "뒤졌", "리스폰"]
+    placement: top
+    style: MemeTop
+    duration: 2.0
+    weight: 1.4
+    cooldown: 20
+
+  - id: gg
+    kind: text
+    text: "GG 😇"
+    triggers: ["망했", "망함", "끝났", "졌다", "졌네", "털렸"]
+    placement: center
+    style: MemeCenter
+    duration: 1.6
+    weight: 1.3
+    cooldown: 30
+
+  - id: skill_issue
+    kind: text
+    text: "( 실 력 문 제 )"
+    triggers: ["실수", "아 진짜", "왜이래", "왜 저래", "손이", "미스"]
+    placement: top
+    style: MemeTop
+    duration: 2.0
+    weight: 1.0
+    cooldown: 40
+
+  - id: ambush
+    kind: text
+    text: "🚨 뒤 조 심 🚨"
+    triggers: ["뒤에", "언제 왔", "어디서", "기습", "당했"]
+    placement: top
+    style: MemeTop
+    duration: 1.8
+    weight: 1.1
+    cooldown: 35
+
+  # ---------------- 성공 / 클리어 ----------------
+  - id: clutch
+    kind: text
+    text: "🏆 캐 리 시 작"
+    triggers: ["이겼", "잡았", "뚫었", "클리어", "성공", "1등", "역전"]
+    placement: center
+    style: MemeCenter
+    duration: 1.8
+    weight: 1.4
+    cooldown: 30
+
+  - id: pro_gamer
+    kind: text
+    text: "프로게이머 무브 🎮"
+    triggers: ["개잘", "잘했", "쩐다", "개쩐", "미쳤다", "지렸"]
+    placement: top
+    style: MemeTop
+    duration: 2.0
+    weight: 1.2
+    cooldown: 35
+
+  - id: survived
+    kind: text
+    text: "😮‍💨 살 았 다"
+    triggers: ["살았", "생존", "버텼", "간신히"]
+    placement: top
+    style: MemeTop
+    duration: 1.8
+    weight: 1.1
+    cooldown: 30
+
+  # ---------------- 리액션 ----------------
+  - id: what
+    kind: text
+    text: "??????"
+    triggers: ["뭐야", "이게 뭐", "어떻게", "말도 안", "실화", "어이없"]
+    placement: center
+    style: MemeCenter
+    duration: 1.4
+    weight: 1.2
+    cooldown: 25
+
+  - id: shock
+    kind: text
+    text: "😱 헐"
+    triggers: ["헐", "우와", "와씨", "소름", "설마"]
+    placement: top
+    style: MemeTop
+    duration: 1.5
+    weight: 1.0
+    cooldown: 25
+
+  - id: laugh_track
+    kind: text
+    text: "ㅋㅋㅋㅋㅋㅋㅋㅋ"
+    triggers: ["ㅋㅋ", "ㅎㅎ", "웃겨", "하하", "개웃"]
+    placement: top
+    style: MemeTop
+    duration: 1.6
+    weight: 1.3
+    cooldown: 20
+    # 이 팩 폴더에 laugh.mp3 를 넣으면 자동으로 효과음까지 나갑니다.
+    sfx: sfx/laugh.mp3
+    sfx_volume: 0.7
+
+  - id: hype_peak
+    kind: text
+    text: "🔥 여기가 하이라이트"
+    triggers: []
+    events: [hype]
+    placement: top
+    style: MemeTop
+    duration: 1.8
+    weight: 1.0
+    cooldown: 45
+    min_excitement: 0.0
+
+  - id: quiet
+    kind: text
+    text: "…🦗"
+    triggers: []
+    events: [silence]
+    placement: center
+    style: MemeCenter
+    duration: 1.4
+    weight: 0.8
+    cooldown: 60
+
+  # ---------------- 게임 상황 ----------------
+  - id: lag
+    kind: text
+    text: "📶 렉 아님 (렉 맞음)"
+    triggers: ["렉", "핑", "버벅", "프레임"]
+    placement: top
+    style: MemeTop
+    duration: 2.0
+    weight: 1.0
+    cooldown: 60
+
+  - id: bug
+    kind: text
+    text: "🐛 게임 탓입니다"
+    triggers: ["버그", "이게 왜", "말이 돼", "판정"]
+    placement: top
+    style: MemeTop
+    duration: 2.0
+    weight: 1.0
+    cooldown: 60
+
+  - id: gamble
+    kind: text
+    text: "🎲 도박의 시간"
+    triggers: ["뽑기", "가챠", "확률", "천장", "질러"]
+    placement: top
+    style: MemeTop
+    duration: 2.0
+    weight: 1.0
+    cooldown: 45
+
+  - id: money
+    kind: text
+    text: "💸 지갑 오픈"
+    triggers: ["결제", "현질", "샀", "지름", "돈"]
+    placement: top
+    style: MemeTop
+    duration: 1.8
+    weight: 0.9
+    cooldown: 60
+
+  # ---------------- 시청자 유도 ----------------
+  - id: subscribe
+    kind: text
+    text: "👍 구독 안 하면 다음 판도 짐"
+    triggers: ["구독", "좋아요", "알림"]
+    placement: bottom
+    style: MemeTop
+    duration: 2.4
+    weight: 0.8
+    cooldown: 120
+
+# 이미지/효과음 밈 예시 (파일을 넣으면 활성화됩니다)
+#  - id: my_reaction
+#    kind: image
+#    asset: images/reaction.png
+#    sfx: sfx/boom.mp3
+#    triggers: ["대박", "미쳤"]
+#    placement: right
+#    scale: 0.3
+#    duration: 2.0

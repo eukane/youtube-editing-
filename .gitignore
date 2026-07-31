@@ -1,0 +1,25 @@
+# 작업/출력물
+work/
+out/
+*.mp4
+*.mkv
+*.mov
+*.wav
+*.mp3
+!assets/memepacks/**/sfx/*.mp3
+
+# 사용자 설정
+gameedit.yaml
+gameedit.yml
+gameedit.json
+
+# 파이썬
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gameedit"
+version = "0.1.0"
+description = "게임 실황 풀영상을 하이라이트 + 밈 + 자막 유튜브 영상으로 자동 편집하는 도구"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# 음성 인식(자막)용. 없으면 외부 자막 파일(--subs)로 대체 가능.
+whisper = ["faster-whisper>=1.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+gameedit = "gameedit.cli:main"
+
+[tool.setuptools]
+packages = ["gameedit"]
+
+[tool.setuptools.package-data]
+gameedit = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
