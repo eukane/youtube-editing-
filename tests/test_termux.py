@@ -139,6 +139,13 @@ def test_installer_creates_launch_command(termux):
     assert "termux-wake-lock" in body        # 편집 중 잠들지 않게
     assert str(ROOT) in body                 # 저장소 위치를 기억한다
 
+    # 'update' 한 단어로 최신 버전을 받을 수 있어야 한다
+    updater = termux["prefix"] / "bin" / "update"
+    assert updater.exists() and os.access(updater, os.X_OK)
+    body_u = updater.read_text()
+    assert "git pull" in body_u and "pip install -e ." in body_u
+    assert str(ROOT) in body_u
+
     # 폰에서 한글을 칠 필요가 없도록 ASCII 이름도 같이 만든다
     for alias in ("edit", "gogo"):
         link = termux["prefix"] / "bin" / alias

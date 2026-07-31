@@ -149,6 +149,10 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
     <h2>완성본 길이</h2>
     <div class="chips" id="lens"></div>
 
+    <h2>편집 강도</h2>
+    <div class="chips" id="paces"></div>
+    <div class="muted" id="pace-hint" style="margin:6px 2px 0"></div>
+
     <h2>편집 옵션</h2>
     <div class="card">
       <div class="row">
@@ -306,18 +310,34 @@ const esc = (s) => String(s||'').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;',
 
 /* ---------------- 옵션 ---------------- */
 const LENGTHS = [3,5,10,15,20];
+const PACES = [
+  ['loose','여유', '말 사이 호흡을 남깁니다. 토크가 많은 영상용'],
+  ['normal','기본', '죽은 시간만 잘라냅니다'],
+  ['fast','빠르게', '숨 쉴 틈 없이 촘촘하게. 밈도 많이 들어갑니다'],
+];
 function openOptions(file){
   state.file = file;
+  state.pace = state.pace || 'normal';
   $('opt-name').textContent = '🎬 ' + file.name;
   $('opt-size').textContent = file.size_mb ? file.size_mb + ' MB' : '';
   $('lens').innerHTML = LENGTHS.map(n =>
     `<div class="chip ${n===state.target?'on':''}" onclick="setLen(${n})">${n}분</div>`).join('');
+  $('paces').innerHTML = PACES.map(([id,name]) =>
+    `<div class="chip ${id===state.pace?'on':''}" onclick="setPace('${id}')">${name}</div>`).join('');
+  setPace(state.pace);
   go('opt');
 }
 function setLen(n){
   state.target = n;
   document.querySelectorAll('#lens .chip').forEach((c,i) =>
     c.classList.toggle('on', LENGTHS[i]===n));
+}
+function setPace(id){
+  state.pace = id;
+  document.querySelectorAll('#paces .chip').forEach((c,i) =>
+    c.classList.toggle('on', PACES[i][0]===id));
+  const hit = PACES.find(p => p[0]===id);
+  $('pace-hint').textContent = hit ? hit[2] : '';
 }
 
 async function action(){
@@ -336,6 +356,7 @@ async function startJob(){
         no_memes: !$('sw-meme').classList.contains('on'),
         no_subtitles: !$('sw-sub').classList.contains('on'),
         shorts: $('sw-shorts').classList.contains('on'),
+        pace: state.pace || 'normal',
       })
     });
     openJob(job.id);

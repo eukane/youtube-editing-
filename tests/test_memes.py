@@ -1,4 +1,5 @@
 from gameedit.config import Config
+from gameedit.highlights import is_generic_label
 from gameedit.memes import MemeDef, _enforce_spacing, load_pack, load_packs
 from gameedit.models import MemeCue
 from gameedit.plan import build_plan
@@ -52,11 +53,22 @@ def test_plan_memes_places_on_output_timeline(analysis):
         assert plan.map_time(cue.source_start) is not None
 
 
-def test_clip_labels_are_emitted(analysis):
+def test_no_clip_labels_in_the_finished_video(analysis):
+    """완성본에 '하이라이트 3' 이 박혀 있으면 검수용 영상처럼 보인다."""
+    plan = build_plan(analysis, Config())
+    assert [c for c in plan.memes if c.meme_id == "clip_label"] == []
+
+
+def test_clip_labels_when_asked_are_content_titles_only(analysis):
+    """켜더라도 자동 번호는 빼고 내용에서 뽑은 제목만 낸다."""
     cfg = Config()
+    cfg.set("memes.clip_intro_label", True)
     plan = build_plan(analysis, cfg)
+
     labels = [c for c in plan.memes if c.meme_id == "clip_label"]
-    assert len(labels) == len(plan.clips)
+    assert labels, "내용 기반 제목까지 사라지면 안 된다"
+    for cue in labels:
+        assert not is_generic_label(cue.text), f"자동 번호가 화면에 나갔다: {cue.text}"
 
 
 def test_memes_can_be_disabled(analysis):
@@ -253,3 +265,18 @@ def test_missing_default_dirs_are_ignored(monkeypatch):
     monkeypatch.setattr(M, "DEFAULT_ASSET_DIRS", ("/없는/폴더/입니다",))
     assert M.default_asset_dirs() == []
     assert M.load_packs(["default"])                # 기본 팩은 그대로 나온다
+
+
+def test_no_review_copy_language_in_the_default_pack():
+    """'여기가 하이라이트' 같은 해설 문구는 완성본에 편집자가 주석 단 꼴이다."""
+    banned = ("하이라이트", "구간", "클립", "편집자", "여기가")
+    for meme in load_packs(["default"]):
+        for word in banned:
+            assert word not in meme.text, f"{meme.id} 의 문구가 검수용이다: {meme.text}"
+
+
+def test_hype_reactions_vary():
+    """텐션 순간마다 같은 문구가 뜨면 금방 질린다."""
+    hype = [m for m in load_packs(["default"]) if "hype" in m.events]
+    assert len(hype) >= 3
+    assert len({m.text for m in hype}) == len(hype)

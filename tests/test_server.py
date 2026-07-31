@@ -342,3 +342,38 @@ def test_garbage_edits_are_ignored_not_crashing(plan):
         result = apply_phone_edits(copy.deepcopy(plan), edits)
         assert result.clips, edits
         assert all(c.start >= 0 for c in result.memes)
+
+
+# ------------------------------------------------------- 편집 강도 (폰 화면)
+
+def test_pace_presets_change_the_editing_config():
+    from gameedit.config import Config
+    from gameedit.server import EDIT_PACE
+
+    assert set(EDIT_PACE) == {"loose", "normal", "fast"}
+
+    base = Config()
+    fast = Config()
+    for key, value in EDIT_PACE["fast"].items():
+        fast.set(key, value)
+
+    # 빠르게 = 더 짧은 무음도 잘라낸다
+    assert (fast.section("editing")["dead_air_min"]
+            < base.section("editing")["dead_air_min"])
+    assert (fast.section("memes")["max_per_minute"]
+            > base.section("memes")["max_per_minute"])
+
+    loose = Config()
+    for key, value in EDIT_PACE["loose"].items():
+        loose.set(key, value)
+    assert loose.section("editing")["cold_open"] is False
+
+
+def test_unknown_pace_falls_back_to_normal():
+    """화면에서 온 값을 그대로 믿으면 안 된다."""
+    from gameedit.server import resolve_pace
+
+    assert resolve_pace("fast") == "fast"
+    assert resolve_pace("설마이런값") == "normal"
+    assert resolve_pace(None) == "normal"
+    assert resolve_pace({"nested": 1}) == "normal"

@@ -163,19 +163,17 @@ def build_subtitle_cues(plan: EditPlan, analysis: Analysis, cfg: dict) -> list[S
     cues: list[SubtitleCue] = []
     for seg in analysis.transcript.segments:
         for start, end, text in _split_segment(seg, cfg):
-            mapped = plan.map_range(start, end)
-            if not mapped:
-                continue
-            out_start, out_end = mapped
             lines = wrap_text(text, max_chars, max_lines)
             if not lines:
                 continue
             style = "Main"
             if emphasis and analysis.audio.mean_between(start, end) >= threshold:
                 style = "Emph"
-            cues.append(SubtitleCue(start=round(out_start, 3), end=round(out_end, 3),
-                                    lines=lines, style=style, speaker=seg.speaker,
-                                    source_start=round(start, 3)))
+            # 점프컷으로 쪼개졌거나 콜드오픈으로 두 번 나오는 구간은 그만큼 나온다
+            for out_start, out_end in plan.map_all_ranges(start, end):
+                cues.append(SubtitleCue(start=round(out_start, 3), end=round(out_end, 3),
+                                        lines=lines, style=style, speaker=seg.speaker,
+                                        source_start=round(start, 3)))
 
     cues.sort(key=lambda c: c.start)
     # 너무 짧은 자막은 다음 자막 직전까지 늘려 가독성 확보

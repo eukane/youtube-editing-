@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from .config import Config
+from .editing import apply_editing, editing_summary
 from .highlights import build_clips
 from .memes import load_packs, plan_memes
 from .models import Analysis, EditPlan, plan_from_dict, load_json
@@ -14,7 +15,10 @@ from .subtitles import build_subtitle_cues
 
 def build_plan(analysis: Analysis, config: Config) -> EditPlan:
     plan = EditPlan(source=analysis.media.path, media=analysis.media)
-    plan.clips = build_clips(analysis, config.section("highlight"))
+    edit_cfg = config.section("editing")
+    # 1단계: 어디를 쓸지 고른다. 2단계: 그걸 편집본으로 만든다.
+    selected = build_clips(analysis, config.section("highlight"))
+    plan.clips = apply_editing(selected, analysis, edit_cfg)
     plan.relayout()
 
     meme_cfg = config.section("memes")
@@ -35,6 +39,8 @@ def build_plan(analysis: Analysis, config: Config) -> EditPlan:
         "meme_packs": list(meme_cfg.get("packs", [])),
         "language": analysis.transcript.language,
         "fallback": bool(plan.clips) and all(c.reason == "fallback" for c in plan.clips),
+        "selected_count": len(selected),
+        "editing": editing_summary(plan.clips, edit_cfg),
     }
     return plan
 

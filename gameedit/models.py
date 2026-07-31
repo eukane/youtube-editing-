@@ -155,10 +155,17 @@ class Clip:
     label: str = ""
     effects: list[str] = field(default_factory=list)  # punch / fadein / fadeout ...
     out_start: float = 0.0  # 결과물 타임라인상의 시작 시각 (plan 빌드 시 계산)
+    speed: float = 1.0      # 1.0 보다 크면 빨리감기 (이동 구간 등)
+
+    @property
+    def source_duration(self) -> float:
+        """원본에서 잘라내는 길이."""
+        return max(0.0, self.source_end - self.source_start)
 
     @property
     def duration(self) -> float:
-        return max(0.0, self.source_end - self.source_start)
+        """결과물에서 차지하는 길이 (빨리감기를 반영)."""
+        return self.source_duration / max(0.01, self.speed)
 
     @property
     def out_end(self) -> float:
@@ -168,7 +175,7 @@ class Clip:
         return self.source_start <= t < self.source_end
 
     def to_out(self, t: float) -> float:
-        return self.out_start + (t - self.source_start)
+        return self.out_start + (t - self.source_start) / max(0.01, self.speed)
 
 
 @dataclass
@@ -238,10 +245,13 @@ class EditPlan:
 
     def map_time(self, source_t: float) -> float | None:
         """원본 시각 → 결과물 시각. 잘려나간 구간이면 None."""
-        for clip in self.clips:
-            if clip.contains_source(source_t):
-                return clip.to_out(source_t)
-        return None
+        times = self.map_all_times(source_t)
+        return times[0] if times else None
+
+    def map_all_times(self, source_t: float) -> list[float]:
+        """같은 원본 시각이 여러 번 나올 수 있다 (콜드오픈으로 앞에 한 번 더 쓰는 등)."""
+        return [clip.to_out(source_t) for clip in self.clips
+                if clip.contains_source(source_t)]
 
     def sanitize(self, *, min_clip: float = 0.2) -> list[str]:
         """말이 안 되는 클립을 걸러낸다.
@@ -314,6 +324,16 @@ class EditPlan:
 
     def map_range(self, start: float, end: float) -> tuple[float, float] | None:
         """원본 구간 → 결과물 구간. 한 클립 안에 들어가는 부분만 살린다."""
+        ranges = self.map_all_ranges(start, end)
+        return ranges[0] if ranges else None
+
+    def map_all_ranges(self, start: float, end: float) -> list[tuple[float, float]]:
+        """원본 구간이 결과물에 나타나는 모든 자리.
+
+        점프컷으로 한 구간이 여러 조각으로 쪼개졌거나, 콜드오픈으로 같은 장면을
+        앞에서 한 번 더 쓰면 자막도 그 횟수만큼 나와야 한다.
+        """
+        out: list[tuple[float, float]] = []
         for clip in self.clips:
             if end <= clip.source_start or start >= clip.source_end:
                 continue
@@ -321,8 +341,8 @@ class EditPlan:
             e = min(end, clip.source_end)
             if e - s <= 0.01:
                 continue
-            return clip.to_out(s), clip.to_out(e)
-        return None
+            out.append((clip.to_out(s), clip.to_out(e)))
+        return out
 
 
 # --------------------------------------------------------------------------

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import load_data_file
+from .highlights import is_generic_label
 from .models import Analysis, EditPlan, MemeCue
 
 
@@ -436,10 +437,12 @@ def plan_memes(plan: EditPlan, analysis: Analysis, memes: list[MemeDef], cfg: di
     cues.extend(_timeskip_cues(plan, memes, cfg))
 
     # 4) 클립 시작 라벨 (간격 규칙과 무관하게 항상 표시)
-    if cfg.get("clip_intro_label", True):
+    if cfg.get("clip_intro_label", False):
         card_starts = [c.start for c in cues if c.trigger == "timeskip"]
         for clip in plan.clips:
-            if not clip.label:
+            # "🔥 하이라이트 3" 같은 자동 번호는 완성본에 얹으면 검수용 영상이
+            # 된다. 내용에서 뽑은 제목만 화면에 낸다.
+            if not clip.label or is_generic_label(clip.label):
                 continue
             # 전환 카드가 뜨는 클립은 라벨까지 겹치면 산만하다
             if any(abs(clip.out_start - t) < 1.0 for t in card_starts):

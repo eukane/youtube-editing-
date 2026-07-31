@@ -85,8 +85,11 @@ def build_cut_filter(plan: EditPlan, cfg: dict, *, width: int, height: int,
 
     for i, clip in enumerate(plan.clips):
         start, end = clip.source_start, clip.source_end
-        duration = max(0.05, end - start)
+        speed = max(1.0, float(getattr(clip, "speed", 1.0) or 1.0))
+        duration = max(0.05, (end - start) / speed)
         chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS"]
+        if speed > 1.0:
+            chain.append(f"setpts=PTS/{speed:.4f}")
         if punch_on and "punch" in clip.effects and punch > 1.0:
             chain.append(
                 f"crop=trunc(iw/{punch:.3f}/2)*2:trunc(ih/{punch:.3f}/2)*2:"
@@ -103,8 +106,14 @@ def build_cut_filter(plan: EditPlan, cfg: dict, *, width: int, height: int,
             chain.append(f"fade=t=out:st={max(0.0, duration - fade):.3f}:d={fade:.3f}")
         parts.append(f"[0:v]{','.join(chain)}[v{i}]")
 
-        achain = [f"atrim=start={start:.3f}:end={end:.3f}", "asetpts=PTS-STARTPTS",
-                  "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"]
+        achain = [f"atrim=start={start:.3f}:end={end:.3f}", "asetpts=PTS-STARTPTS"]
+        # atempo 는 한 번에 2배까지만 되므로 필요하면 여러 번 건다 (음정은 유지된다)
+        remaining = speed
+        while remaining > 1.0001:
+            step = min(2.0, remaining)
+            achain.append(f"atempo={step:.4f}")
+            remaining /= step
+        achain.append("aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo")
         if fade > 0:
             achain.append(f"afade=t=in:st=0:d={fade:.3f}")
             achain.append(f"afade=t=out:st={max(0.0, duration - fade):.3f}:d={fade:.3f}")

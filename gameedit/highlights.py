@@ -258,6 +258,15 @@ def _trim_silence_edges(start: float, end: float, silences: list[tuple[float, fl
     return start, end
 
 
+# 내용과 무관한 자동 번호. 목록에서 고를 때는 쓸모 있지만 완성본 화면에
+# 얹으면 편집본이 아니라 검수용 영상처럼 보인다.
+GENERIC_LABEL_PREFIXES = ("🔥 하이라이트", "🎬 구간", "🎬 전체")
+
+
+def is_generic_label(label: str) -> bool:
+    return (label or "").startswith(GENERIC_LABEL_PREFIXES)
+
+
 def label_for(text: str, index: int, categories=None) -> tuple[str, str]:
     lowered = (text or "").lower()
     for key, label, words in (categories or CATEGORY_KEYWORDS):

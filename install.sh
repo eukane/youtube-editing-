@@ -164,6 +164,19 @@ chmod +x "$BIN"
 ln -sf "$BIN" "$PREFIX/bin/edit"
 ln -sf "$BIN" "$PREFIX/bin/gogo"
 
+# 최신 버전 받아오기: 'update' 한 단어
+UPDATER="$PREFIX/bin/update"
+cat > "$UPDATER" <<EOF
+#!/data/data/com.termux/files/usr/bin/bash
+# 편집기를 최신 버전으로
+cd "$TARGET" || exit 1
+echo "최신 버전을 받는 중…"
+git pull --ff-only || { echo "❌ 받기 실패. 인터넷 연결을 확인해 주세요."; exit 1; }
+pip install -e . >/dev/null 2>&1 || pip install -e .
+echo "✅ 최신 버전입니다. 이제 edit 을 치면 됩니다."
+EOF
+chmod +x "$UPDATER"
+
 echo
 echo "=================================================="
 echo "  ✅ 설치 끝!"
@@ -173,6 +186,7 @@ echo
 echo "      edit          (또는 편집기)"
 echo
 echo "  그러면 주소가 나옵니다. 크롬으로 그 주소를 여세요."
+echo "  나중에 최신 버전을 받으려면:  update"
 echo "=================================================="
 echo
 echo "지금 바로 켜보려면:  edit"

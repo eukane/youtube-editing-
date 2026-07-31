@@ -259,16 +259,52 @@ memes:
     cooldown: 45
 
   # ======================= 편집 연출 =======================
-  - id: hype_peak
-    text: "🔥 여기가 하이라이트"
-    asset: images/하이라이트.png
-    sfx: sfx/하이라이트.mp3
+  # 텐션이 튀는 순간에 얹는 리액션.
+  # "여기가 하이라이트" 같은 설명 문구는 넣지 않는다. 완성본에 편집자가
+  # 해설을 다는 꼴이라 검수용 영상처럼 보인다. 시청자가 지금 느낄 말을 대신 쓴다.
+  - id: hype_what
+    text: "?!?!?!"
+    asset: images/뭐야.png
+    sfx: sfx/놀람.mp3
+    triggers: []
+    events: [hype]
+    placement: center
+    style: MemeCenter
+    duration: 1.2
+    weight: 1.0
+    cooldown: 25
+
+  - id: hype_omg
+    text: "ㅁ ㅊ"
+    asset: images/ㅁㅊ.png
     triggers: []
     events: [hype]
     placement: top
-    duration: 1.8
+    duration: 1.3
     weight: 1.0
-    cooldown: 45
+    cooldown: 25
+
+  - id: hype_wait
+    text: "잠깐만"
+    asset: images/잠깐만.png
+    triggers: []
+    events: [hype]
+    placement: top
+    duration: 1.4
+    weight: 0.9
+    cooldown: 35
+
+  - id: hype_scream
+    text: "으아아아아"
+    asset: images/비명.png
+    sfx: sfx/비명.mp3
+    triggers: []
+    events: [hype]
+    placement: center
+    style: MemeCenter
+    duration: 1.3
+    weight: 0.9
+    cooldown: 35
 
   - id: quiet
     text: "…🦗"

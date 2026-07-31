@@ -98,6 +98,41 @@ class Job:
         }
 
 
+# 폰 화면에서 고르는 '편집 강도'. 값의 근거는 editing.py 를 보면 된다.
+EDIT_PACE: dict[str, dict] = {
+    # 원본 흐름을 살린다. 말 사이 호흡이 필요한 토크형 영상용.
+    "loose": {
+        "editing.dead_air_min": 1.2,
+        "editing.speed_ramp": False,
+        "editing.bridge_gaps": False,
+        "editing.cold_open": False,
+        "memes.max_per_minute": 2.0,
+    },
+    # 기본. 죽은 시간은 없애되 대사는 온전히 남긴다.
+    "normal": {},
+    # 실황 하이라이트 편집의 표준 속도. 숨 쉴 틈을 거의 남기지 않는다.
+    "fast": {
+        "editing.dead_air_min": 0.32,
+        "editing.dead_air_keep": 0.08,
+        "editing.dead_air_min_piece": 0.5,
+        "editing.ramp_speed": 3.0,
+        "editing.bridge_speed": 12.0,
+        "editing.bridge_max": 35.0,
+        "editing.ramp_min_duration": 1.8,
+        "editing.cold_open_max": 3.5,
+        "memes.max_per_minute": 7.0,
+        "memes.cooldown": 4.0,
+        "highlight.pad_before": 0.8,
+        "highlight.pad_after": 0.6,
+    },
+}
+
+
+def resolve_pace(value) -> str:
+    """화면에서 온 값은 못 믿는다. 모르는 값이면 기본으로."""
+    return value if isinstance(value, str) and value in EDIT_PACE else "normal"
+
+
 class JobManager:
     """작업 큐. 한 번에 하나씩만 돌린다 (인코딩이 CPU를 다 쓰기 때문)."""
 
@@ -194,6 +229,8 @@ class JobManager:
             config.set("subtitles.enabled", False)
         if job.options.get("shorts"):
             config.set("project.resolution", "1080x1920")
+        for key, value in EDIT_PACE.get(job.options.get("pace") or "", {}).items():
+            config.set(key, value)
         return config
 
     def _run(self, job: Job, *, render_only: bool = False) -> None:
@@ -673,6 +710,7 @@ class Handler(BaseHTTPRequestHandler):
             "no_memes": bool(data.get("no_memes")),
             "no_subtitles": bool(data.get("no_subtitles")),
             "shorts": bool(data.get("shorts")),
+            "pace": resolve_pace(data.get("pace")),
         }
         job = self.manager.create(source, options)
         self._send_json(job.as_dict())

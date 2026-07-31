@@ -111,9 +111,31 @@ DEFAULTS: dict[str, Any] = {
         "auto_reaction": True,  # 키워드가 없어도 흥분 피크에 리액션 밈 삽입
         "auto_reaction_threshold": 0.8,
         "silence_meme_min": 2.5,  # 편집본에 이만큼 긴 정적이 남았을 때만 정적 밈
-        "clip_intro_label": True,  # 클립 시작마다 하이라이트 제목 표시
+        # 클립마다 "🔥 하이라이트 3" 같은 제목을 얹으면 완성본이 아니라 검수용
+        # 영상처럼 보인다. 기본은 끔. 켜도 내용에서 뽑은 제목만 나간다.
+        "clip_intro_label": False,
         "sfx_volume": 0.8,
         "duck_music": False,
+    },
+    # 고른 구간을 '편집'으로 만드는 단계. 자세한 근거는 editing.py 참고.
+    "editing": {
+        "enabled": True,
+        "dead_air": True,          # 점프컷 (말 사이 빈 시간 잘라내기)
+        "dead_air_min": 0.5,       # 이보다 긴 무음이면 자른다
+        "dead_air_keep": 0.12,     # 자른 자리에 남기는 여유 (말꼬리 보호)
+        "dead_air_min_piece": 0.8, # 이보다 짧은 조각은 버린다
+        "max_pieces": 400,         # 조각이 이보다 많아지면 기준을 완화
+        "bridge_gaps": True,       # 가까운 하이라이트 사이는 자르지 말고 빨리 감아 잇는다
+        "bridge_min": 1.5,
+        "bridge_max": 25.0,        # 이보다 멀면 그냥 잘라낸다
+        "bridge_speed": 8.0,
+        "speed_ramp": True,        # 말 없는 잔잔한 구간은 빨리감기
+        "ramp_speed": 2.0,
+        "ramp_min_duration": 2.5,
+        "ramp_max_score": 0.35,
+        "cold_open": True,         # 제일 센 장면을 맨 앞에 한 번 더
+        "cold_open_max": 5.0,
+        "end_on_peak": True,       # 밋밋한 마지막 클립은 떼어낸다
     },
     "render": {
         "video_codec": "libx264",
