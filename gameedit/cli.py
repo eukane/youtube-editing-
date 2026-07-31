@@ -339,6 +339,47 @@ def cmd_auto(args) -> int:
     return 0
 
 
+def typed_while_running(line: str) -> str:
+    """편집기가 돌고 있을 때 명령을 치면 그 글자는 그냥 삼켜진다.
+
+    처음 쓰는 사람은 서버가 떠 있는 줄 모르고 update / edit 를 계속 친다.
+    아무 반응이 없으면 고장 난 줄 알기 때문에 무슨 상황인지 알려 준다.
+    """
+    word = (line or "").strip().split(" ")[0].lower()
+    if not word:
+        return ""
+    known = {"update": "최신 버전 받기", "edit": "편집기 켜기",
+             "gogo": "편집기 켜기", "편집기": "편집기 켜기",
+             "exit": "끄기", "quit": "끄기", "ls": "", "cd": ""}
+    if word in known:
+        what = known[word] or "그 명령"
+        return (f"\n  ℹ️  지금은 편집기가 **돌고 있는 중**이라 여기에 친 글자는 실행되지 않습니다.\n"
+                f"     · 편집을 하려면 → 크롬에서 localhost:8000 을 여세요\n"
+                f"     · '{word}'({what})를 쓰려면 → 먼저 CTRL+C 로 편집기를 끄고 치세요\n")
+    return ("\n  ℹ️  편집기가 돌고 있어서 여기에 친 글자는 실행되지 않습니다. "
+            "끄려면 CTRL+C.\n")
+
+
+def _watch_typing(log) -> None:
+    """편집기가 도는 동안 사용자가 뭔가 치면 안내한다."""
+    import sys as _sys
+    import threading
+
+    if not _sys.stdin or not _sys.stdin.isatty():
+        return
+
+    def loop():
+        try:
+            for line in _sys.stdin:
+                message = typed_while_running(line)
+                if message:
+                    log(message)
+        except (OSError, ValueError):
+            pass
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def cmd_serve(args) -> int:
     from .server import serve
 
@@ -349,6 +390,7 @@ def cmd_serve(args) -> int:
         # 폰 안에서 서버와 브라우저가 같이 돌아가는 경우
         host = "127.0.0.1"
         access_key = ""
+    _watch_typing(log)
     serve(config, host=host, port=args.port,
           root=Path(args.work) if args.work else None,
           access_key=access_key,

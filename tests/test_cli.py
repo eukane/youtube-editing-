@@ -247,3 +247,36 @@ def test_sanitize_keeps_valid_plan_untouched(analysis):
     before = [(c.source_start, c.source_end) for c in plan.clips]
     assert plan.sanitize() == []
     assert [(c.source_start, c.source_end) for c in plan.clips] == before
+
+
+# ---------------------------------- 편집기가 도는 중에 명령을 친 경우 안내
+
+def test_typing_update_while_running_explains_what_to_do():
+    """서버가 떠 있으면 친 글자가 삼켜진다. 아무 반응이 없으면 고장인 줄 안다."""
+    from gameedit.cli import typed_while_running
+
+    msg = typed_while_running("update\n")
+    assert "돌고 있는" in msg
+    assert "CTRL+C" in msg
+    assert "localhost:8000" in msg
+
+
+def test_typing_edit_while_running_is_recognised():
+    from gameedit.cli import typed_while_running
+
+    for word in ("edit", "gogo", "편집기"):
+        assert "CTRL+C" in typed_while_running(word)
+
+
+def test_unknown_typing_still_gets_a_hint():
+    from gameedit.cli import typed_while_running
+
+    msg = typed_while_running("아무거나")
+    assert "CTRL+C" in msg
+
+
+def test_blank_line_says_nothing():
+    from gameedit.cli import typed_while_running
+
+    assert typed_while_running("") == ""
+    assert typed_while_running("   \n") == ""
