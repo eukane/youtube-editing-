@@ -98,6 +98,19 @@ DEFAULTS: dict[str, Any] = {
         "emphasis_color": "&H0033E8FF",  # 노랑 (ASS 는 BGR)
         "pop_animation": True,
         "export_srt": True,
+        # 제일 센 짧은 대사는 화면을 채우는 초대형 자막으로 (실제 편집본의 그 자막)
+        "impact": True,
+        "impact_threshold": 0.88,
+        "impact_max_chars": 14,     # 이보다 길면 초대형으로 안 뺀다
+        # 2.7 = 실제 편집본 캡처에서 잰 '글자 폭 화면의 71%' 와 일치하는 값
+        "impact_scale": 2.7,
+        "impact_color": "&H002020F0",   # ASS 는 BGR — 빨강
+        # 0 이면 margin_v 의 절반. 레터박스를 켰다면 검은 띠 안에 들어가도록
+        # 이 값을 띠 높이에 맞춰 올려야 글자가 그림 위로 안 올라온다.
+        "impact_margin_v": 0,
+        # 문장 안에서 이 단어들만 색을 바꾼다 (한 줄 전체가 아니라)
+        "highlight_words": [],
+        "word_color": "&H0033E8FF",
     },
     "memes": {
         "enabled": True,
@@ -159,6 +172,12 @@ DEFAULTS: dict[str, Any] = {
         "punch_amount": 1.12,
         "clip_fade": 0.12,
         "loudnorm": True,
+        # 위아래 검은 띠 (0=끔, 0.11이면 위아래 각각 화면 높이의 11%).
+        # 자막을 화면 밖에 놓는 연출용. 항상 켜는 게 아니라 필요할 때만.
+        "letterbox": 0.0,
+        "watermark": "",            # 우하단에 상시 노출할 로고 이미지 경로
+        "watermark_scale": 0.07,    # 화면 너비 대비 크기
+        "watermark_opacity": 0.85,
         "threads": 0,
         "keep_intermediate": False,
     },

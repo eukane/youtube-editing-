@@ -159,6 +159,9 @@ def build_subtitle_cues(plan: EditPlan, analysis: Analysis, cfg: dict) -> list[S
     min_duration = float(cfg.get("min_duration", 0.9))
     emphasis = bool(cfg.get("emphasis", True))
     threshold = float(cfg.get("emphasis_threshold", 0.72))
+    impact = bool(cfg.get("impact", True))
+    impact_threshold = float(cfg.get("impact_threshold", 0.88))
+    impact_max_chars = int(cfg.get("impact_max_chars", 14))
 
     cues: list[SubtitleCue] = []
     for seg in analysis.transcript.segments:
@@ -167,8 +170,15 @@ def build_subtitle_cues(plan: EditPlan, analysis: Analysis, cfg: dict) -> list[S
             if not lines:
                 continue
             style = "Main"
-            if emphasis and analysis.audio.mean_between(start, end) >= threshold:
+            level = analysis.audio.mean_between(start, end)
+            if emphasis and level >= threshold:
                 style = "Emph"
+            # 제일 센 대사는 화면을 채우는 초대형 자막으로 (실제 편집본의 그 자막)
+            if impact and level >= impact_threshold and len(text) <= impact_max_chars:
+                style = "Impact"
+            # 괄호로 시작하면 대사가 아니라 상황 설명이다
+            if text.strip().startswith(("(", "（")):
+                style = "Narr"
             # 점프컷으로 쪼개졌거나 콜드오픈으로 두 번 나오는 구간은 그만큼 나온다
             for out_start, out_end in plan.map_all_ranges(start, end):
                 cues.append(SubtitleCue(start=round(out_start, 3), end=round(out_end, 3),
@@ -224,6 +234,35 @@ def reference_resolution(width: int, height: int, *, base_height: int = 1080) ->
     return ref_w - (ref_w % 2), base_height
 
 
+def _as_word_list(value) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [w.strip() for w in value.split(",") if w.strip()]
+    return [str(w).strip() for w in value if str(w).strip()]
+
+
+def colorize_words(text: str, words: list[str], color: str) -> str:
+    """문장 **안의 특정 단어만** 다른 색으로.
+
+    실제 편집본을 보면 한 줄 전체를 노랗게 하는 게 아니라 고유명사나 핵심
+    단어 하나만 색을 바꾼다. 문장은 흰색으로 두고 그 단어만 튄다.
+
+    (이 함수는 이미 escape_ass 를 거친 문자열을 받는다. `\\c` 는 인자 없이
+     쓰면 스타일 기본색으로 되돌아간다.)
+    """
+    if not text or not words:
+        return text
+    # 긴 단어부터 칠해야 "메타몽"이 "메타"에 먹히지 않는다
+    for word in sorted({w for w in words if w}, key=len, reverse=True):
+        if word not in text:
+            continue
+        if "\\c" in text and f"{{\\c{color}&}}{word}" in text:
+            continue
+        text = text.replace(word, f"{{\\c{color}&}}{word}{{\\c}}", 1)
+    return text
+
+
 def _card_style_line(name: str, *, font: str, size: int, primary: str) -> str:
     """BorderStyle 3 = 글자 뒤에 불투명 박스. 전환 카드용."""
     # ASS 알파는 00 이 불투명. 40 이면 살짝 비치는 검은 판.
@@ -249,6 +288,11 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     emphasis_color = cfg.get("emphasis_color", "&H0033E8FF")
     align = _ALIGN.get(cfg.get("position", "bottom"), 2)
     pop = bool(cfg.get("pop_animation", True))
+    impact_color = cfg.get("impact_color", "&H002020F0")   # ASS 는 BGR — 빨강
+    impact_scale = float(cfg.get("impact_scale", 2.7))
+    impact_margin_v = int(cfg.get("impact_margin_v", 0) or 0)
+    word_color = cfg.get("word_color", emphasis_color)
+    word_list = _as_word_list(cfg.get("highlight_words", []))
 
     header = [
         "[Script Info]",
@@ -280,6 +324,17 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
         _style_line("Label", font=font, size=int(size * 0.72), primary="&H00FFFFFF",
                     outline_color="&H00202020", bold=-1, outline=max(1.0, outline - 1), shadow=1,
                     align=7, margin_v=40, margin_l=54),
+        # 제일 센 대사용. 실제 편집본에서 화면 폭을 거의 채우는 빨간 글씨 +
+        # 두꺼운 검은 외곽선으로 나가는 그 자막.
+        _style_line("Impact", font=font, size=int(size * impact_scale),
+                    primary=impact_color, outline_color="&H00000000", bold=-1,
+                    outline=outline * 2.2, shadow=shadow + 1,
+                    align=2, margin_v=(impact_margin_v or max(20, int(margin_v * 0.5))),
+                    margin_l=24, margin_r=24),
+        # 상황 설명·해설용 (괄호로 시작하는 줄). 대사 자막과 겹치지 않게 위쪽.
+        _style_line("Narr", font=font, size=int(size * 0.78), primary="&H0000E8FF",
+                    outline_color=outline_color, bold=-1, outline=max(1.5, outline - 1.5),
+                    shadow=1, align=8, margin_v=int(height * 0.30)),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -290,11 +345,21 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     fade_main = "{\\fad(80,80)}" if pop else ""
     fade_emph = ("{\\fad(60,60)\\t(0,120,\\fscx115\\fscy115)\\t(120,260,\\fscx100\\fscy100)}"
                  if pop else "")
+    fade_impact = ("{\\fad(50,120)\\t(0,110,\\fscx125\\fscy125)\\t(110,240,\\fscx100\\fscy100)}"
+                   if pop else "{\\fad(50,120)}")
     for cue in cues:
         if cue.end <= cue.start:
             continue
-        tag = fade_emph if cue.style == "Emph" else fade_main
+        if cue.style == "Impact":
+            tag = fade_impact
+        elif cue.style == "Emph":
+            tag = fade_emph
+        else:
+            tag = fade_main
         text = escape_ass("\n".join(cue.lines))
+        # 초대형 자막은 그 자체로 눈에 띄니 단어 색을 또 바꾸지 않는다
+        if cue.style != "Impact":
+            text = colorize_words(text, word_list, word_color)
         events.append((cue.start,
                        f"Dialogue: 0,{_ass_time(cue.start)},{_ass_time(cue.end)},{cue.style},"
                        f"{cue.speaker},0,0,0,,{tag}{text}"))
@@ -304,7 +369,8 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     for cue in meme_cues:
         if not cue.text or not getattr(cue, "show_text", cue.kind == "text"):
             continue
-        style = (cue.style if cue.style in ("MemeTop", "MemeCenter", "Card", "Label", "Main", "Emph")
+        style = (cue.style if cue.style in ("MemeTop", "MemeCenter", "Card", "Label",
+                                            "Main", "Emph", "Impact", "Narr")
                  else "MemeTop")
         if style == "Label":
             tag = "{\\fad(120,200)}"

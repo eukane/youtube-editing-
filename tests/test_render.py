@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from gameedit.config import Config
@@ -147,3 +149,71 @@ def test_max_resolution_only_shrinks(plan):
     plan.media.width, plan.media.height = 3840, 2160
     assert resolve_output_size(plan, {"resolution": "1920x1080",
                                       "max_resolution": "640x360"})[:2] == (1920, 1080)
+
+
+# ------------------------------------------- 레터박스 / 워터마크 (캡처 참고)
+
+def test_letterbox_shrinks_the_picture_and_leaves_black_bands():
+    from gameedit.config import Config
+    from gameedit.models import Clip, EditPlan, MediaInfo
+    from gameedit.render import build_cut_filter
+
+    plan = EditPlan(source="/tmp/a.mp4",
+                    media=MediaInfo(path="/tmp/a.mp4", duration=30.0, width=1920,
+                                    height=1080, has_audio=True))
+    plan.clips = [Clip(source_start=0.0, source_end=5.0)]
+    plan.relayout()
+
+    plain = build_cut_filter(plan, Config().section("render"),
+                             width=1920, height=1080, fps=30.0, has_audio=True)
+    boxed = build_cut_filter(plan, dict(Config().section("render"), letterbox=0.11),
+                             width=1920, height=1080, fps=30.0, has_audio=True)
+
+    assert "scale=1920:1080" in plain
+    assert "scale=1920:1080" not in boxed          # 그림이 작아진다
+    assert "pad=1920:1080" in boxed                # 남는 자리는 검은 띠
+
+    inner = int(re.search(r"scale=1920:(\d+)", boxed).group(1))
+    assert inner % 2 == 0                          # 홀수 높이는 인코더가 싫어한다
+    assert 0.74 <= inner / 1080 <= 0.82            # 위아래 11%씩 잘린 만큼
+
+
+def test_letterbox_is_off_by_default():
+    from gameedit.config import Config
+    assert Config().section("render")["letterbox"] == 0.0
+
+
+def test_watermark_is_overlaid_bottom_right(tmp_path):
+    from gameedit.config import Config
+    from gameedit.models import Clip, EditPlan, MediaInfo
+    from gameedit.render import build_dress_command
+
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"x")
+    plan = EditPlan(source="/tmp/a.mp4",
+                    media=MediaInfo(path="/tmp/a.mp4", duration=30.0, width=1280, height=720))
+    plan.clips = [Clip(source_start=0.0, source_end=5.0)]
+    plan.relayout()
+
+    cfg = dict(Config().section("render"), watermark=str(logo))
+    cmd = build_dress_command(plan, cfg, tmp_path / "cut.mp4", None,
+                              tmp_path / "out.mp4", width=1280, height=720)
+    joined = " ".join(cmd)
+    assert str(logo) in joined
+    assert "overlay=x=W-w-" in joined and "y=H-h-" in joined
+
+
+def test_missing_watermark_file_is_ignored(tmp_path):
+    from gameedit.config import Config
+    from gameedit.models import Clip, EditPlan, MediaInfo
+    from gameedit.render import build_dress_command
+
+    plan = EditPlan(source="/tmp/a.mp4",
+                    media=MediaInfo(path="/tmp/a.mp4", duration=30.0, width=1280, height=720))
+    plan.clips = [Clip(source_start=0.0, source_end=5.0)]
+    plan.relayout()
+
+    cfg = dict(Config().section("render"), watermark="/없는/로고.png")
+    cmd = build_dress_command(plan, cfg, tmp_path / "cut.mp4", None,
+                              tmp_path / "out.mp4", width=1280, height=720)
+    assert "없는" not in " ".join(cmd)

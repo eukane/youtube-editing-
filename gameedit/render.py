@@ -77,6 +77,7 @@ def build_cut_filter(plan: EditPlan, cfg: dict, *, width: int, height: int,
                      fps: float, has_audio: bool) -> str:
     punch_on = bool(cfg.get("punch_zoom", True))
     punch = float(cfg.get("punch_amount", 1.12))
+    band = max(0.0, min(0.25, float(cfg.get("letterbox", 0.0) or 0.0)))
     fade = float(cfg.get("clip_fade", 0.12))
 
     parts: list[str] = []
@@ -97,7 +98,10 @@ def build_cut_filter(plan: EditPlan, cfg: dict, *, width: int, height: int,
                 f"crop=trunc(iw/{amount:.3f}/2)*2:trunc(ih/{amount:.3f}/2)*2:"
                 f"(iw-trunc(iw/{amount:.3f}/2)*2)/2:(ih-trunc(ih/{amount:.3f}/2)*2)/2"
             )
-        chain.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
+        # 레터박스를 켜면 영상을 가운데로 줄이고 위아래에 검은 띠를 남긴다
+        inner_h = height - 2 * int(height * band / 2) * 2 if band > 0 else height
+        inner_h = max(2, inner_h - inner_h % 2)
+        chain.append(f"scale={width}:{inner_h}:force_original_aspect_ratio=decrease")
         chain.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black")
         chain.append("setsar=1")
         if fps:
@@ -190,9 +194,28 @@ def build_dress_command(plan: EditPlan, cfg: dict, source: Path, ass_path: Path 
         audio_inputs.append((index, cue))
         index += 1
 
+    # 채널 로고: 영상 내내 우하단에 얹는다 (실제 편집본들이 다 달고 있다)
+    mark = str(cfg.get("watermark", "") or "")
+    mark_idx = 0
+    if mark and Path(mark).exists():
+        cmd += ["-i", mark]
+        mark_idx = index
+        index += 1
+
     parts: list[str] = []
     current = "[base]"
     parts.append("[0:v]format=yuv420p[base]")
+
+    if mark_idx:
+        mark_w = max(0.01, min(0.3, float(cfg.get("watermark_scale", 0.07))))
+        alpha = max(0.0, min(1.0, float(cfg.get("watermark_opacity", 0.85))))
+        margin = max(8, int(width * 0.015))
+        parts.append(
+            f"[{mark_idx}:v]scale={int(width * mark_w)}:-2,format=rgba,"
+            f"colorchannelmixer=aa={alpha:.3f}[wm]"
+        )
+        parts.append(f"{current}[wm]overlay=x=W-w-{margin}:y=H-h-{margin}[wmark]")
+        current = "[wmark]"
 
     for n, (input_idx, cue) in enumerate(visual_inputs):
         overlay_w = max(0.02, min(1.0, cue.scale))
