@@ -20,7 +20,9 @@ echo "  모델: $MODEL_SIZE"
 echo "=================================================="
 echo
 
-if [ -z "$PREFIX" ] || [ ! -d "/data/data/com.termux" ]; then
+# TERMUX_ROOT 는 테스트에서 가짜 환경을 가리키게 하기 위한 것. 평소엔 건드릴 일 없다.
+TERMUX_ROOT="${TERMUX_ROOT:-/data/data/com.termux}"
+if [ -z "$PREFIX" ] || [ ! -d "$TERMUX_ROOT" ]; then
     echo "❌ Termux 앱 안에서 실행해 주세요."
     exit 1
 fi

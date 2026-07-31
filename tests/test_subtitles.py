@@ -135,3 +135,38 @@ def test_card_style_and_show_text_flag():
     assert "대체문구" not in text
     assert "3분 후" in text
     assert text.count("Dialogue:") == 1
+
+
+def test_split_by_words_never_breaks_a_word():
+    """whisper.cpp 처럼 단어 타임스탬프가 없을 때도 단어가 쪼개지면 안 된다."""
+    from gameedit.subtitles import split_by_words
+
+    chunks = split_by_words("ask what you can do for your country", 18)
+    assert all(len(c) <= 18 for c in chunks)
+    assert " ".join(chunks) == "ask what you can do for your country"
+    for chunk in chunks:
+        for word in chunk.split():
+            assert word in "ask what you can do for your country".split()
+
+    # 한 단어가 통째로 넘치면 그때만 강제로 자른다
+    assert split_by_words("ㅋ" * 40, 10) == ["ㅋ" * 10] * 4
+    assert split_by_words("", 10) == []
+
+
+def test_segment_without_word_timestamps_keeps_words_intact():
+    from gameedit.models import Segment
+    from gameedit.subtitles import _split_segment
+
+    cfg = dict(Config().section("subtitles"), max_chars_per_line=10, max_lines=1)
+    seg = Segment(start=0.0, end=6.0, text="아 죽었어 죽었어 왜 죽냐고 진짜")
+    pieces = _split_segment(seg, cfg)
+
+    assert len(pieces) > 1
+    rebuilt = " ".join(text for _, _, text in pieces)
+    assert rebuilt == "아 죽었어 죽었어 왜 죽냐고 진짜"
+    # 시간이 순서대로 이어지고 원래 구간을 벗어나지 않는다
+    assert pieces[0][0] == pytest.approx(0.0)
+    assert pieces[-1][1] == pytest.approx(6.0)
+    for (s1, e1, _), (s2, _, _) in zip(pieces, pieces[1:]):
+        assert e1 == pytest.approx(s2)
+        assert e1 > s1

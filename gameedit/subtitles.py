@@ -64,6 +64,58 @@ def wrap_text(text: str, max_chars: int, max_lines: int = 2) -> list[str]:
     return lines
 
 
+def split_by_words(text: str, budget: int) -> list[str]:
+    """긴 문장을 budget 글자 이하 덩어리로 나눈다. 단어를 쪼개지 않는다."""
+    text = " ".join((text or "").split())
+    if not text:
+        return []
+    if len(text) <= budget:
+        return [text]
+
+    chunks: list[str] = []
+    current = ""
+    for token in text.split(" "):
+        while len(token) > budget:  # 한 단어가 통째로 넘칠 때만 강제로 자른다
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(token[:budget])
+            token = token[budget:]
+        if not current:
+            current = token
+        elif len(current) + 1 + len(token) <= budget:
+            current = f"{current} {token}"
+        else:
+            chunks.append(current)
+            current = token
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _split_without_timestamps(seg: Segment, budget: int) -> list[tuple[float, float, str]]:
+    """단어 타임스탬프가 없는 전사(whisper.cpp, 외부 자막 등) 처리.
+
+    글자 수로만 자르면 'ask' 가 'a' / 'sk' 로 쪼개진다. 단어 경계를 지키고,
+    시간은 덩어리 길이에 비례해 나눠 준다.
+    """
+    chunks = split_by_words(seg.text, budget)
+    if not chunks:
+        return []
+    if len(chunks) == 1:
+        return [(seg.start, seg.end, chunks[0])]
+
+    span = max(0.4, seg.end - seg.start)
+    total = sum(len(c) for c in chunks)
+    out: list[tuple[float, float, str]] = []
+    elapsed = 0.0
+    for chunk in chunks:
+        share = span * len(chunk) / total
+        out.append((seg.start + elapsed, seg.start + elapsed + share, chunk))
+        elapsed += share
+    return out
+
+
 def _split_segment(seg: Segment, cfg: dict) -> list[tuple[float, float, str]]:
     """세그먼트를 자막 한 장 분량으로 쪼갠다."""
     max_chars = int(cfg.get("max_chars_per_line", 18))
@@ -74,22 +126,7 @@ def _split_segment(seg: Segment, cfg: dict) -> list[tuple[float, float, str]]:
 
     words = [w for w in seg.words if w.text.strip()]
     if not words:
-        text = " ".join(seg.text.split())
-        if not text:
-            return []
-        span = max(0.4, seg.end - seg.start)
-        pieces = max(1, min(int(len(text) / budget) + (1 if len(text) % budget else 0),
-                            max(1, int(span / max(0.8, max_duration)) + 1)))
-        if pieces == 1:
-            return [(seg.start, seg.end, text)]
-        step = len(text) / pieces
-        out: list[tuple[float, float, str]] = []
-        for i in range(pieces):
-            chunk = text[int(i * step): int((i + 1) * step)].strip()
-            if not chunk:
-                continue
-            out.append((seg.start + span * i / pieces, seg.start + span * (i + 1) / pieces, chunk))
-        return out
+        return _split_without_timestamps(seg, budget)
 
     chunks: list[tuple[float, float, str]] = []
     buf: list = []

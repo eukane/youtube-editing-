@@ -14,7 +14,9 @@ echo "  게임 하이라이트 편집기 - 폰 설치"
 echo "=================================================="
 echo
 
-if [ -z "$PREFIX" ] || [ ! -d "/data/data/com.termux" ]; then
+# TERMUX_ROOT 는 테스트에서 가짜 환경을 가리키게 하기 위한 것. 평소엔 건드릴 일 없다.
+TERMUX_ROOT="${TERMUX_ROOT:-/data/data/com.termux}"
+if [ -z "$PREFIX" ] || [ ! -d "$TERMUX_ROOT" ]; then
     echo "❌ 이 스크립트는 Termux 앱 안에서 실행해야 합니다."
     echo "   F-Droid 에서 Termux 를 설치한 뒤 다시 시도해 주세요."
     echo "   (플레이스토어 버전은 오래돼서 안 됩니다)"
