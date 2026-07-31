@@ -152,9 +152,17 @@ def test_impact_colour_rotates_between_lines(scfg):
     assert len(dialogue) == 4
 
     import re
-    overrides = {m.group(1) for x in dialogue
-                 for m in re.finditer(r"\\c(&H[0-9A-F]{8})&", x)}
-    assert len(overrides) >= 2, f"같은 색만 계속 나온다: {overrides}"
+    base = next(x for x in ass.splitlines()
+                if x.startswith("Style: Impact,")).split(",")[3]
+
+    def colour_of(line):
+        m = re.search(r"\\c(&H[0-9A-F]{8})&", line)
+        return m.group(1) if m else base
+
+    used = [colour_of(x) for x in dialogue]
+    assert len(set(used)) >= 2, f"같은 색만 계속 나온다: {used}"
+    # 빨강과 노랑만 쓴다 (마젠타·주황 같은 건 안 쓴다)
+    assert set(used) <= {"&H002020F0", "&H0033E8FF"}
 
 
 def test_single_impact_colour_can_be_pinned(scfg):
@@ -242,3 +250,100 @@ def test_phrase_colour_wins_over_whole_line_emphasis(scfg):
 def test_multi_word_phrase_is_coloured_as_one_block():
     out = colorize_words("바로 전구 폼 로토무!", ["전구 폼 로토무"], "&H002090F0")
     assert out.startswith("바로 {\\c&H002090F0&}전구 폼 로토무{\\c}")
+
+
+# ------------------------------------------------- 강조 단어 자동 선정
+
+def _transcript(*texts):
+    from gameedit.models import Segment, Transcript
+    return Transcript(segments=[Segment(start=i, end=i + 1, text=t)
+                                for i, t in enumerate(texts)])
+
+
+def test_repeated_proper_noun_is_picked_automatically():
+    """사람이 영상마다 단어를 손으로 적게 하면 아무도 안 쓴다."""
+    from gameedit.subtitles import auto_highlight_words
+
+    words = auto_highlight_words(_transcript(
+        "로토무가 나왔다", "로토무는 강해", "이번에도 로토무", "그냥 평범한 대사",
+    ), min_count=3)
+    assert "로토무" in words          # 조사가 붙어도 같은 말로 센다
+
+
+def test_common_words_are_not_picked():
+    from gameedit.subtitles import auto_highlight_words
+
+    words = auto_highlight_words(_transcript(
+        "진짜 그냥 이거 ㅋㅋ", "진짜 그냥 이거 ㅋㅋ", "진짜 그냥 이거 ㅋㅋ",
+    ), min_count=2)
+    assert words == [], f"흔한 말에 색을 칠하면 의미가 없다: {words}"
+
+
+def test_rare_words_are_not_picked():
+    from gameedit.subtitles import auto_highlight_words
+
+    words = auto_highlight_words(_transcript("한 번만 나온 뮤츠"), min_count=3)
+    assert "뮤츠" not in words
+
+
+def test_shorter_word_inside_a_longer_one_is_dropped():
+    from gameedit.subtitles import auto_highlight_words
+
+    words = auto_highlight_words(_transcript(
+        *["전구로토무 로토무"] * 4,
+    ), min_count=3)
+    assert "전구로토무" in words and "로토무" not in words
+
+
+def test_manual_list_overrides_the_automatic_one():
+    from gameedit.subtitles import resolve_highlight_words
+
+    transcript = _transcript(*["로토무 나왔다"] * 5)
+    cfg = dict(Config().section("subtitles"), highlight_words=["내가 정한 말"])
+    assert resolve_highlight_words(cfg, transcript) == ["내가 정한 말"]
+
+
+def test_auto_highlight_can_be_turned_off():
+    from gameedit.subtitles import resolve_highlight_words
+
+    transcript = _transcript(*["로토무 나왔다"] * 5)
+    cfg = dict(Config().section("subtitles"), auto_highlight=False)
+    assert resolve_highlight_words(cfg, transcript) == []
+
+
+def test_only_one_phrase_per_line_gets_colour(scfg):
+    """한 줄에서 여러 단어를 칠하면 정신없다."""
+    out = colorize_words("로토무와 메타몽이 같이", ["로토무", "메타몽"],
+                         "&H0033E8FF", limit=1)
+    assert out.count("{\\c&H0033E8FF&}") == 1
+
+
+def test_plan_records_the_words_it_chose(analysis):
+    from gameedit.plan import build_plan
+
+    plan = build_plan(analysis, Config())
+    assert "highlight_words" in plan.meta      # 사람이 보고 고칠 수 있게
+
+
+def test_narration_is_small_and_plain(scfg):
+    """자질구레한 설명은 작게, 색 없이. 색은 강조에만 쓴다."""
+    ass = build_ass([], [], scfg)
+    styles = {x.split(",")[0].removeprefix("Style: "): x
+              for x in ass.splitlines() if x.startswith("Style: ")}
+
+    assert int(styles["Narr"].split(",")[2]) < int(styles["Main"].split(",")[2])
+    assert styles["Narr"].split(",")[3] == "&H00FFFFFF"     # 흰색
+    assert styles["Narr"].split(",")[18] == "8"             # 화면 위쪽 (대사와 분리)
+    assert styles["Main"].split(",")[18] == "2"             # 대사는 하단 가운데
+
+
+def test_colour_is_reserved_for_emphasis(scfg):
+    """평소 자막은 흰색. 색이 붙는 건 강조(노랑)와 초강조(빨강)뿐."""
+    ass = build_ass([], [], scfg)
+    styles = {x.split(",")[0].removeprefix("Style: "): x.split(",")[3]
+              for x in ass.splitlines() if x.startswith("Style: ")}
+
+    assert styles["Main"] == "&H00FFFFFF"
+    assert styles["Narr"] == "&H00FFFFFF"
+    assert styles["Emph"] == "&H0033E8FF"      # 노랑
+    assert styles["Impact"] == "&H002020F0"    # 빨강

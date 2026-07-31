@@ -108,8 +108,12 @@ DEFAULTS: dict[str, Any] = {
         "impact_max_chars": 14,     # 이보다 길면 초대형으로 안 뺀다
         # 2.7 = 실제 편집본 캡처에서 잰 '글자 폭 화면의 71%' 와 일치하는 값
         "impact_scale": 2.7,
-        # 캡처를 보면 강조색이 하나가 아니다. 줄마다 돌려 쓴다. (ASS 는 BGR)
-        "impact_colors": ["&H00E020E0", "&H002020F0", "&H002090F0", "&H00FFFFFF"],
+        # 색은 의미로 쓴다. 평소는 흰색, 강조만 색.
+        #   보통 대사      → 흰색  (Main)
+        #   목소리 커짐    → 노랑  (Emph)
+        #   제일 센 순간   → 빨강  (Impact)
+        # 빨강만 계속 쓰면 무뎌져서 노랑과 번갈아 쓴다. (ASS 는 BGR 순서)
+        "impact_colors": ["&H002020F0", "&H0033E8FF"],   # 빨강, 노랑
         "impact_color": "",         # 하나로 고정하고 싶을 때만
         # 이전 줄을 작게 위에 남기고 현재 줄을 크게 아래에 (캡처의 2단 자막)
         "two_tier": False,
@@ -117,9 +121,18 @@ DEFAULTS: dict[str, Any] = {
         # 0 이면 margin_v 의 절반. 레터박스를 켰다면 검은 띠 안에 들어가도록
         # 이 값을 띠 높이에 맞춰 올려야 글자가 그림 위로 안 올라온다.
         "impact_margin_v": 0,
-        # 문장 안에서 이 단어들만 색을 바꾼다 (한 줄 전체가 아니라)
+        # 자질구레한 설명(괄호 자막)은 작게, 대사 자막과 떨어진 곳에.
+        "narr_scale": 0.7,
+        "narr_position": "top",     # top / center / bottom
+        # 문장 안에서 특정 단어만 색을 바꾼다 (한 줄 전체가 아니라).
+        # 비워 두면 영상의 대사에서 자주 나오는 고유명사를 **자동으로** 고른다.
+        # 직접 적고 싶을 때만 채우면 된다.
         "highlight_words": [],
-        "word_color": "&H0033E8FF",
+        "auto_highlight": True,
+        "auto_highlight_min_count": 3,   # 이만큼 반복돼야 그 영상의 핵심어로 본다
+        "auto_highlight_max": 8,
+        "word_color": "&H0033E8FF",      # 노랑
+        "highlight_per_line": 1,         # 한 줄에 색을 바꾸는 구절 개수
     },
     "memes": {
         "enabled": True,

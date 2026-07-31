@@ -304,7 +304,7 @@ class JobManager:
         return plan
 
     def _render(self, job: Job, config: Config, plan: EditPlan, work_dir: Path, log) -> None:
-        sub_cfg = with_title_card(config.section("subtitles"), config.section("project"))
+        sub_cfg = with_title_card(config.section("subtitles"), config.section("project"), plan)
         ass_path = None
         if sub_cfg.get("enabled", True) or plan.memes:
             ass_path = write_ass(work_dir / "subtitles.ass", plan.subtitles, plan.memes,

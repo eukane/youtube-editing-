@@ -134,7 +134,7 @@ def write_plan_outputs(plan: EditPlan, analysis: Analysis | None, config: Config
     outputs: dict[str, Path] = {}
     outputs["plan"] = save_json(plan, work_dir / "plan.json")
 
-    sub_cfg = with_title_card(config.section("subtitles"), config.section("project"))
+    sub_cfg = with_title_card(config.section("subtitles"), config.section("project"), plan)
     width = plan.media.width or 1920
     height = plan.media.height or 1080
     resolution = (config.get("project.resolution") or "").lower()

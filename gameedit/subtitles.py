@@ -151,6 +151,23 @@ def _split_segment(seg: Segment, cfg: dict) -> list[tuple[float, float, str]]:
 # --------------------------------------------------------------------------
 
 
+def resolve_highlight_words(cfg: dict, transcript) -> list[str]:
+    """색을 바꿀 단어 목록. 직접 적은 게 있으면 그것, 없으면 자동으로 찾는다.
+
+    사람이 영상마다 "전구 폼 로토무" 같은 걸 손으로 적게 하면 아무도 안 쓴다.
+    """
+    manual = _as_word_list(cfg.get("highlight_words", []))
+    if manual:
+        return manual
+    if not cfg.get("auto_highlight", True):
+        return []
+    return auto_highlight_words(
+        transcript,
+        min_count=int(cfg.get("auto_highlight_min_count", 3)),
+        max_words=int(cfg.get("auto_highlight_max", 8)),
+    )
+
+
 def build_subtitle_cues(plan: EditPlan, analysis: Analysis, cfg: dict) -> list[SubtitleCue]:
     if not cfg.get("enabled", True):
         return []
@@ -162,7 +179,7 @@ def build_subtitle_cues(plan: EditPlan, analysis: Analysis, cfg: dict) -> list[S
     impact = bool(cfg.get("impact", True))
     impact_threshold = float(cfg.get("impact_threshold", 0.88))
     impact_max_chars = int(cfg.get("impact_max_chars", 14))
-    word_list = _as_word_list(cfg.get("highlight_words", []))
+    word_list = resolve_highlight_words(cfg, analysis.transcript)
 
     cues: list[SubtitleCue] = []
     for seg in analysis.transcript.segments:
@@ -247,7 +264,62 @@ def _as_word_list(value) -> list[str]:
     return [str(w).strip() for w in value if str(w).strip()]
 
 
-def colorize_words(text: str, words: list[str], color: str) -> str:
+# 자동 강조에서 걸러낼 말. 조사·감탄사·흔한 말은 색을 바꿔 봐야 의미가 없다.
+_STOPWORDS = {
+    "그래", "그냥", "진짜", "이거", "저거", "그거", "여기", "저기", "거기",
+    "아니", "근데", "그니까", "그러니까", "이제", "지금", "우리", "너무", "정말",
+    "하는", "하고", "해서", "했는데", "있는", "있어", "없는", "없어", "같은", "같아",
+    "이렇게", "저렇게", "그렇게", "어떻게", "무슨", "무슨가", "뭔가", "약간",
+    "ㅋㅋ", "ㅋㅋㅋ", "ㅎㅎ", "습니다", "합니다", "입니다", "겁니다",
+}
+# 한국어는 명사 뒤에 조사가 붙어서 같은 말이 다른 토큰이 된다. 꼬리를 떼고 센다.
+_PARTICLES = ("으로써", "이라는", "이라고", "라는", "라고", "에서", "으로", "한테",
+              "까지", "부터", "이랑", "하고", "처럼", "보다", "마다", "밖에",
+              "이야", "이네", "인데", "구나", "네요", "이다",
+              "은", "는", "이", "가", "을", "를", "에", "로", "도", "만",
+              "과", "와", "의", "야", "아", "랑", "네", "요", "죠", "지")
+
+
+def _strip_particle(token: str) -> str:
+    for tail in _PARTICLES:
+        if len(token) > len(tail) + 1 and token.endswith(tail):
+            return token[: -len(tail)]
+    return token
+
+
+def auto_highlight_words(transcript, *, min_count: int = 3, max_words: int = 8) -> list[str]:
+    """영상의 대사에서 '그 영상의 핵심어'를 자동으로 뽑는다.
+
+    편집자가 색을 바꾸는 단어는 대개 그 영상에서 반복해서 나오는 고유명사다
+    (게임 이름·캐릭터 이름·그날의 주제). 사람이 영상마다 손으로 적게 하는
+    대신, 자주 나오면서 흔한 말이 아닌 것을 골라 준다.
+    """
+    import re
+    from collections import Counter
+
+    counts: Counter = Counter()
+    for seg in getattr(transcript, "segments", []) or []:
+        for raw in re.findall(r"[가-힣A-Za-z][가-힣A-Za-z0-9]+", seg.text or ""):
+            token = _strip_particle(raw)
+            if len(token) < 2 or token in _STOPWORDS:
+                continue
+            if all(ch in "ㅋㅎㅠㅜ" for ch in token):
+                continue
+            counts[token] += 1
+
+    picked = [word for word, count in counts.most_common() if count >= min_count]
+    # 짧은 말이 긴 말의 일부이면 긴 쪽만 둔다 ("로토무" vs "전구로토무")
+    out: list[str] = []
+    for word in sorted(picked, key=len, reverse=True):
+        if any(word in kept for kept in out):
+            continue
+        out.append(word)
+        if len(out) >= max_words:
+            break
+    return out
+
+
+def colorize_words(text: str, words: list[str], color: str, *, limit: int = 0) -> str:
     """문장 **안의 특정 단어만** 다른 색으로.
 
     실제 편집본을 보면 한 줄 전체를 노랗게 하는 게 아니라 고유명사나 핵심
@@ -258,13 +330,17 @@ def colorize_words(text: str, words: list[str], color: str) -> str:
     """
     if not text or not words:
         return text
+    done = 0
     # 긴 단어부터 칠해야 "메타몽"이 "메타"에 먹히지 않는다
     for word in sorted({w for w in words if w}, key=len, reverse=True):
+        if limit and done >= limit:
+            break
         if word not in text:
             continue
         if "\\c" in text and f"{{\\c{color}&}}{word}" in text:
             continue
         text = text.replace(word, f"{{\\c{color}&}}{word}{{\\c}}", 1)
+        done += 1
     return text
 
 
@@ -277,12 +353,20 @@ def _card_style_line(name: str, *, font: str, size: int, primary: str) -> str:
     )
 
 
-def with_title_card(sub_cfg: dict, project_cfg: dict) -> dict:
-    """타이틀 카드 설정은 project 섹션에 있고 자막은 subtitles 섹션이 그린다."""
-    return dict(sub_cfg,
-                title=project_cfg.get("title", ""),
-                title_date=project_cfg.get("title_date", ""),
-                title_seconds=project_cfg.get("title_seconds", 2.5))
+def with_title_card(sub_cfg: dict, project_cfg: dict, plan=None) -> dict:
+    """ASS 를 쓰기 직전에 여러 섹션에 흩어진 값을 한 곳으로 모은다.
+
+    타이틀 카드 설정은 project 섹션에 있고, 자동으로 고른 강조 단어는
+    편집 계획(plan.meta)에 들어 있다. 둘 다 자막이 그려야 한다.
+    """
+    merged = dict(sub_cfg,
+                  title=project_cfg.get("title", ""),
+                  title_date=project_cfg.get("title_date", ""),
+                  title_seconds=project_cfg.get("title_seconds", 2.5))
+    words = (getattr(plan, "meta", None) or {}).get("highlight_words") if plan else None
+    if words and not _as_word_list(sub_cfg.get("highlight_words", [])):
+        merged["highlight_words"] = list(words)
+    return merged
 
 
 def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
@@ -305,6 +389,7 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     impact_margin_v = int(cfg.get("impact_margin_v", 0) or 0)
     word_color = cfg.get("word_color", emphasis_color)
     word_list = _as_word_list(cfg.get("highlight_words", []))
+    per_line = int(cfg.get("highlight_per_line", 1) or 0)
     # 강조색은 한 가지가 아니라 줄마다 돌려 쓴다 (캡처에서 확인)
     palette = _as_word_list(cfg.get("impact_colors", [])) or ["&H002020F0"]
     if cfg.get("impact_color"):
@@ -351,9 +436,11 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
                     align=2, margin_v=(impact_margin_v or max(20, int(margin_v * 0.5))),
                     margin_l=24, margin_r=24),
         # 상황 설명·해설용 (괄호로 시작하는 줄). 대사 자막과 겹치지 않게 위쪽.
-        _style_line("Narr", font=font, size=int(size * 0.78), primary="&H0000E8FF",
-                    outline_color=outline_color, bold=-1, outline=max(1.5, outline - 1.5),
-                    shadow=1, align=8, margin_v=int(height * 0.30)),
+        _style_line("Narr", font=font, size=int(size * float(cfg.get("narr_scale", 0.7))),
+                    primary="&H00FFFFFF", outline_color=outline_color, bold=0,
+                    outline=max(1.5, outline - 1.5), shadow=1,
+                    align=_ALIGN.get(cfg.get("narr_position", "top"), 8),
+                    margin_v=int(height * 0.30)),
         # 2단 자막의 윗줄 (직전 대사를 작게 남긴다)
         _style_line("Prev", font=font, size=int(size * impact_scale * 0.42),
                     primary="&H00FFFFFF", outline_color="&H00000000", bold=-1,
@@ -427,7 +514,7 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
                                f"{fade_main}{escape_ass(' '.join(prev.lines))}"))
         else:
             # 초대형 자막은 그 자체로 눈에 띄니 단어 색을 또 바꾸지 않는다
-            text = colorize_words(text, word_list, word_color)
+            text = colorize_words(text, word_list, word_color, limit=per_line)
         events.append((cue.start,
                        f"Dialogue: 0,{_ass_time(cue.start)},{_ass_time(cue.end)},{cue.style},"
                        f"{cue.speaker},0,0,0,,{tag}{text}"))

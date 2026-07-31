@@ -10,7 +10,7 @@ from .editing import apply_editing, editing_summary
 from .highlights import build_clips
 from .memes import load_packs, plan_memes
 from .models import Analysis, EditPlan, plan_from_dict, load_json
-from .subtitles import build_subtitle_cues
+from .subtitles import build_subtitle_cues, resolve_highlight_words
 
 
 def build_plan(analysis: Analysis, config: Config) -> EditPlan:
@@ -40,6 +40,10 @@ def build_plan(analysis: Analysis, config: Config) -> EditPlan:
         "language": analysis.transcript.language,
         "fallback": bool(plan.clips) and all(c.reason == "fallback" for c in plan.clips),
         "selected_count": len(selected),
+        # 자동으로 고른 강조 단어. 렌더 단계에서 색을 칠할 때 쓰고,
+        # plan.json 에 남으니 사람이 보고 고칠 수도 있다.
+        "highlight_words": resolve_highlight_words(config.section("subtitles"),
+                                                   analysis.transcript),
         "editing": editing_summary(plan.clips, edit_cfg),
     }
     return plan
