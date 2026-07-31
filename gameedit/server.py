@@ -128,6 +128,33 @@ EDIT_PACE: dict[str, dict] = {
 }
 
 
+_DURATION_CACHE: dict[tuple[str, int, int], float] = {}
+
+
+def probe_duration(path: Path) -> float:
+    """영상 길이(초). 못 읽으면 0.
+
+    목록을 열 때마다 파일마다 ffprobe 를 돌리므로 결과를 기억해 둔다.
+    파일이 바뀌면(크기·수정시각) 다시 잰다.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        return 0.0
+    key = (str(path), stat.st_size, int(stat.st_mtime))
+    if key in _DURATION_CACHE:
+        return _DURATION_CACHE[key]
+    try:
+        from .media import probe
+        duration = round(float(probe(path).duration or 0.0), 2)
+    except Exception:          # 깨진 파일이 목록 전체를 막으면 안 된다
+        duration = 0.0
+    if len(_DURATION_CACHE) > 500:
+        _DURATION_CACHE.clear()
+    _DURATION_CACHE[key] = duration
+    return duration
+
+
 def resolve_style(value) -> str:
     """편집 스타일 이름도 화면에서 오니 검증한다. 빈 값이면 스타일 없음."""
     from .styles import STYLES, resolve
@@ -647,6 +674,9 @@ class Handler(BaseHTTPRequestHandler):
                     "path": str(entry),
                     "name": entry.name,
                     "size_mb": round(entry.stat().st_size / 1024 / 1024, 1),
+                    # 원본보다 긴 완성본은 만들 수 없다. 화면에서 그런 선택지를
+                    # 아예 안 보여 주려면 길이를 알아야 한다.
+                    "duration": probe_duration(entry),
                 })
         return files
 

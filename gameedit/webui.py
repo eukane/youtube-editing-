@@ -313,14 +313,24 @@ function statusText(j){
 const esc = (s) => String(s||'').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 
 /* ---------------- 옵션 ---------------- */
-const LENGTHS = [3,5,10,15,20];
+const ALL_LENGTHS = [3,5,10,15,20];
+/* 5분짜리 원본으로 10분 완성본은 못 만든다. 원본보다 긴 선택지는 숨긴다. */
+function lengthsFor(file){
+  const mins = (file && file.duration) ? file.duration / 60 : 0;
+  if (!mins) return ALL_LENGTHS;
+  const fits = ALL_LENGTHS.filter(n => n <= mins * 0.9);
+  return fits.length ? fits : [ALL_LENGTHS[0]];
+}
+function fmtDuration(sec){
+  if (!sec) return '';
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return `${m}분 ${String(s).padStart(2,'0')}초`;
+}
+/* 실제 편집본 캡처로 확인한 스타일만 둔다. 근거 없는 건 넣지 않는다.
+   여기 목록과 서버의 styles.py 가 어긋나면 골라도 아무 일이 안 일어난다. */
 const STYLES = [
   ['','없음','기본 설정으로 편집합니다'],
-  ['anmori','안모리','평균 컷 2.2초 · 줌 1.2~1.5배 · 무음 0.15초부터 제거'],
-  ['seungsangsing','승상싱','평균 컷 1.6초 · 줌 최대 4배 · 초고압축'],
-  ['kangjiwon','강지원','평균 컷 2.8초 · 교전만 조임 · 무음 0.8초부터'],
-  ['bate','바테','평균 컷 2.1초 · 줌 2.5배 고정 · 자막 1줄'],
-  ['baljep','발젭','평균 컷 1.8초 · 매 컷 효과음 · 무음 0.1초부터'],
+  ['anmori','안모리','자막 크게·굵게, 강조는 노랑/빨강, 2단 자막'],
 ];
 const PACES = [
   ['loose','여유', '말 사이 호흡을 남깁니다. 토크가 많은 영상용'],
@@ -331,8 +341,14 @@ function openOptions(file){
   state.file = file;
   state.pace = state.pace || 'normal';
   $('opt-name').textContent = '🎬 ' + file.name;
-  $('opt-size').textContent = file.size_mb ? file.size_mb + ' MB' : '';
-  $('lens').innerHTML = LENGTHS.map(n =>
+  const bits = [];
+  if (file.duration) bits.push('원본 ' + fmtDuration(file.duration));
+  if (file.size_mb) bits.push(file.size_mb + ' MB');
+  $('opt-size').textContent = bits.join(' · ');
+
+  state.lengths = lengthsFor(file);
+  if (!state.lengths.includes(state.target)) state.target = state.lengths[0];
+  $('lens').innerHTML = state.lengths.map(n =>
     `<div class="chip ${n===state.target?'on':''}" onclick="setLen(${n})">${n}분</div>`).join('');
   state.style = state.style || '';
   $('styles').innerHTML = STYLES.map(([id,name]) =>
@@ -345,8 +361,9 @@ function openOptions(file){
 }
 function setLen(n){
   state.target = n;
+  const list = state.lengths || ALL_LENGTHS;
   document.querySelectorAll('#lens .chip').forEach((c,i) =>
-    c.classList.toggle('on', LENGTHS[i]===n));
+    c.classList.toggle('on', list[i]===n));
 }
 function setStyle(id){
   state.style = id;

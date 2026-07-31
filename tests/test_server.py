@@ -377,3 +377,95 @@ def test_unknown_pace_falls_back_to_normal():
     assert resolve_pace("설마이런값") == "normal"
     assert resolve_pace(None) == "normal"
     assert resolve_pace({"nested": 1}) == "normal"
+
+
+# ------------------------------- 화면 목록과 실제 기능이 어긋나지 않는지
+
+def test_ui_only_offers_styles_that_actually_exist():
+    """화면에 없는 스타일을 골라도 아무 일이 안 일어난다. 조용한 실패다."""
+    import re
+
+    from gameedit.styles import STYLES
+    from gameedit.webui import PAGE
+
+    block = re.search(r"const STYLES = \[(.*?)\];", PAGE, re.S)
+    assert block, "화면의 스타일 목록을 못 찾았다"
+    offered = set(re.findall(r"\['([a-z]*)'", block.group(1)))
+
+    assert offered - {""} == set(STYLES), (
+        f"화면과 실제가 다르다 — 화면 {offered - {''}} / 실제 {set(STYLES)}")
+
+
+def test_every_offered_style_survives_validation():
+    import re
+
+    from gameedit.server import resolve_style
+    from gameedit.webui import PAGE
+
+    block = re.search(r"const STYLES = \[(.*?)\];", PAGE, re.S)
+    for key in re.findall(r"\['([a-z]+)'", block.group(1)):
+        assert resolve_style(key) == key, f"{key} 를 골라도 무시된다"
+
+
+# ------------------------------------------- 원본보다 긴 완성본은 못 만든다
+
+def test_file_listing_reports_duration(tmp_path, monkeypatch):
+    from gameedit import server as S
+
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x" * 10)
+    monkeypatch.setattr(S, "probe", lambda p: type("M", (), {"duration": 305.0})(),
+                        raising=False)
+    monkeypatch.setattr("gameedit.media.probe",
+                        lambda p: type("M", (), {"duration": 305.0})())
+    S._DURATION_CACHE.clear()
+    assert S.probe_duration(video) == 305.0
+
+
+def test_broken_file_does_not_break_the_listing(tmp_path, monkeypatch):
+    from gameedit import server as S
+
+    video = tmp_path / "broken.mp4"
+    video.write_bytes(b"not a video")
+
+    def boom(_path):
+        raise RuntimeError("깨진 파일")
+
+    monkeypatch.setattr("gameedit.media.probe", boom)
+    S._DURATION_CACHE.clear()
+    assert S.probe_duration(video) == 0.0        # 0 이면 화면은 전체 선택지를 준다
+
+
+def test_missing_file_is_zero(tmp_path):
+    from gameedit.server import probe_duration
+
+    assert probe_duration(tmp_path / "없음.mp4") == 0.0
+
+
+def test_duration_is_cached_per_file_version(tmp_path, monkeypatch):
+    from gameedit import server as S
+
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x")
+    calls = []
+
+    def counted(path):
+        calls.append(path)
+        return type("M", (), {"duration": 42.0})()
+
+    monkeypatch.setattr("gameedit.media.probe", counted)
+    S._DURATION_CACHE.clear()
+    assert S.probe_duration(video) == 42.0
+    assert S.probe_duration(video) == 42.0
+    assert len(calls) == 1, "같은 파일을 두 번 재고 있다"
+
+
+def test_length_options_are_clamped_in_the_ui():
+    """5분 원본에 10·15·20분 선택지를 주면 안 된다."""
+    import re
+
+    from gameedit.webui import PAGE
+
+    assert "function lengthsFor" in PAGE
+    body = re.search(r"function lengthsFor\(file\)\{(.*?)\n\}", PAGE, re.S).group(1)
+    assert "duration" in body and "filter" in body
