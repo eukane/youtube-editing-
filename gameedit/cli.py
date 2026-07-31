@@ -189,7 +189,8 @@ def cmd_doctor(args) -> int:
     hint = ""
     if backend == "none":
         hint = ("  → PC: `pip install faster-whisper` / "
-                "폰(Termux): `bash termux자막설치.sh` / 또는 --subs 로 자막 파일 지정")
+                "폰(Termux): `bash ~/gameedit/install-subtitles.sh` / "
+                "또는 --subs 로 자막 파일 지정")
     log(f"음성인식 : {backend}{hint}")
     log(f"  faster-whisper: {'설치됨' if _module_available('faster_whisper') else '없음'}")
     log(f"  openai-whisper: {'설치됨' if _module_available('whisper') else '없음'}")

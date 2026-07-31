@@ -22,24 +22,32 @@
 Termux 화면을 길게 눌러 **Paste** → 엔터.
 
 ```
-pkg install -y git && git clone --depth 1 https://github.com/eukane/youtube-editing-.git ~/gameedit && bash ~/gameedit/termux설치.sh
+pkg install -y git && git clone --depth 1 https://github.com/eukane/youtube-editing-.git ~/gameedit && bash ~/gameedit/install.sh
 ```
 
 - **저장소 권한**을 물으면 → **허용** (폰 안의 영상을 읽어야 합니다)
 - 중간에 뭘 물으면 → 그냥 엔터
 
+붙여넣기가 잘리거나 오류가 나면, 아래 세 줄을 **한 줄씩** 치세요.
+
+```
+pkg install -y git
+git clone --depth 1 https://github.com/eukane/youtube-editing-.git ~/gameedit
+bash ~/gameedit/install.sh
+```
+
 말한 내용을 자막으로도 만들고 싶으면 한 번만 더 (선택, 5~15분):
 
 ```
-bash ~/gameedit/termux자막설치.sh
+bash ~/gameedit/install-subtitles.sh
 ```
 
 ### 3. 실행 — 편집할 때마다
 
-Termux 에 두 글자만 칩니다.
+Termux 에 네 글자만 칩니다.
 
 ```
-편집기
+edit
 ```
 
 주소가 나오면 **크롬을 열고 `localhost:8000`** 으로 들어가세요.
@@ -90,7 +98,7 @@ Termux 는 끄지 말고 두세요. 홈 버튼으로 나가는 건 괜찮습니�
 분석이 끝난 뒤였다면 다시 실행해도 분석은 반복하지 않습니다.
 
 **자막이 □□□ 로 나옴**
-`편집기 --set subtitles.font="Noto Sans CJK KR"`
+`edit --set subtitles.font="Noto Sans CJK KR"`
 
 **저장 공간 부족**
 원본의 2~3배 여유가 필요합니다. 다 쓴 작업은 `rm -rf ~/gameedit/work/mobile/jobs/*`
@@ -308,16 +316,16 @@ Termux 앱으로 폰 안에 파이썬·ffmpeg 를 설치해 통째로 돌립니�
 
 ```bash
 # Termux 에서 한 줄
-pkg install -y git && git clone --depth 1 <저장소> ~/gameedit && bash ~/gameedit/termux설치.sh
+pkg install -y git && git clone --depth 1 <저장소> ~/gameedit && bash ~/gameedit/install.sh
 
-# 설치 후에는 두 글자
-편집기
+# 설치 후에는 네 글자
+edit
 ```
 
 크롬으로 `localhost:8000` 을 열면 같은 화면이 뜹니다.
 폰에서는 `--profile phone` 이 자동 적용돼 **장면 검출을 건너뛰고**, 720p 이하로,
 빠른 인코딩 설정으로 돕니다. 자막은 whisper.cpp 로 만듭니다
-(`bash ~/gameedit/termux자막설치.sh`).
+(`bash ~/gameedit/install-subtitles.sh`).
 
 자세한 사용법 → [docs/폰에서만-쓰기.md](docs/폰에서만-쓰기.md)
 

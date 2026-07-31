@@ -119,7 +119,7 @@ def test_server_labels_and_folders_on_termux(monkeypatch, tmp_path):
 # --------------------------------------------------------------- 설치 스크립트
 
 def test_installer_refuses_outside_termux(tmp_path):
-    proc = subprocess.run(["bash", str(ROOT / "termux설치.sh")],
+    proc = subprocess.run(["bash", str(ROOT / "install.sh")],
                           env={**os.environ, "PREFIX": "", "TERMUX_ROOT": str(tmp_path / "없음")},
                           capture_output=True, text=True, timeout=60)
     assert proc.returncode == 1
@@ -127,7 +127,7 @@ def test_installer_refuses_outside_termux(tmp_path):
 
 
 def test_installer_creates_launch_command(termux):
-    proc = run_script("termux설치.sh", termux)
+    proc = run_script("install.sh", termux)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "설치 끝" in proc.stdout
 
@@ -139,6 +139,12 @@ def test_installer_creates_launch_command(termux):
     assert "termux-wake-lock" in body        # 편집 중 잠들지 않게
     assert str(ROOT) in body                 # 저장소 위치를 기억한다
 
+    # 폰에서 한글을 칠 필요가 없도록 ASCII 이름도 같이 만든다
+    for alias in ("edit", "gogo"):
+        link = termux["prefix"] / "bin" / alias
+        assert link.exists(), f"{alias} 별칭이 없다"
+        assert Path(os.path.realpath(link)) == launcher.resolve()
+
     calls = termux["log"].read_text()
     assert "termux-setup-storage" in calls   # 저장소 권한 요청
     assert "pkg install -y python ffmpeg git" in calls
@@ -146,15 +152,23 @@ def test_installer_creates_launch_command(termux):
 
 
 def test_installer_is_idempotent(termux):
-    assert run_script("termux설치.sh", termux).returncode == 0
-    assert run_script("termux설치.sh", termux).returncode == 0
+    assert run_script("install.sh", termux).returncode == 0
+    assert run_script("install.sh", termux).returncode == 0
     assert (termux["prefix"] / "bin" / "편집기").exists()
+
+
+def test_korean_named_wrappers_still_work(termux):
+    """예전 안내문을 보고 한글 이름으로 실행해도 그대로 설치돼야 한다."""
+    proc = run_script("termux설치.sh", termux)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "설치 끝" in proc.stdout
+    assert (termux["prefix"] / "bin" / "edit").exists()
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg 필요")
 def test_generated_launcher_actually_starts_the_server(termux):
     """설치 스크립트가 만든 '편집기' 명령으로 서버가 진짜 뜨는지."""
-    assert run_script("termux설치.sh", termux).returncode == 0
+    assert run_script("install.sh", termux).returncode == 0
 
     import signal
     import socket
@@ -213,7 +227,7 @@ def test_subtitle_installer_wires_whisper_cpp(termux):
     models.mkdir()
     (models / "ggml-base.bin").write_bytes(b"ggml")
 
-    proc = run_script("termux자막설치.sh", termux)
+    proc = run_script("install-subtitles.sh", termux)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "자막 준비 끝" in proc.stdout
 
