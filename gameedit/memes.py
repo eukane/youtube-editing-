@@ -459,8 +459,46 @@ def plan_memes(plan: EditPlan, analysis: Analysis, memes: list[MemeDef], cfg: di
                 source_start=clip.source_start,
             ))
 
+    # 5) 컷 전환음 — 컷마다 소리를 얹는 스타일용 (간격 규칙과 별개)
+    cues.extend(_transition_sfx_cues(plan, memes, cfg))
+
     cues.sort(key=lambda c: c.start)
     return cues
+
+
+def _transition_sfx_cues(plan: EditPlan, memes: list[MemeDef], cfg: dict) -> list[MemeCue]:
+    """컷이 넘어갈 때마다 짧은 효과음을 깐다.
+
+    화면에는 아무것도 안 띄우고 소리만 넣는다. 컷 전환이 '들리는' 편집은
+    이 장르에서 흔하고, 밈 개수 제한과는 따로 세야 한다(소리는 안 겹치니까).
+    """
+    every = int(cfg.get("transition_sfx_every", 0) or 0)
+    if every <= 0 or len(plan.clips) < 2:
+        return []
+
+    name = str(cfg.get("transition_sfx", "전환"))
+    source = next((m for m in memes if m.id == name or Path(m.sfx or "").stem == name), None)
+    if source is None or not source.resolved_sfx():
+        return []
+
+    volume = float(cfg.get("transition_sfx_volume", 0.45))
+    out: list[MemeCue] = []
+    for i, clip in enumerate(plan.clips):
+        if i == 0 or i % every:
+            continue
+        out.append(MemeCue(
+            start=round(max(0.0, clip.out_start - 0.05), 3),
+            duration=0.5,
+            meme_id="cut_sfx",
+            kind="audio",
+            text="",
+            show_text=False,
+            sfx=str(source.resolved_sfx()),
+            sfx_volume=volume,
+            trigger="cut",
+            source_start=clip.source_start,
+        ))
+    return out
 
 
 def humanize_gap(seconds: float) -> str:

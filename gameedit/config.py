@@ -116,6 +116,10 @@ DEFAULTS: dict[str, Any] = {
         "clip_intro_label": False,
         "sfx_volume": 0.8,
         "duck_music": False,
+        # 컷이 넘어갈 때마다 까는 짧은 효과음 (0이면 안 넣음, 1이면 매 컷)
+        "transition_sfx_every": 0,
+        "transition_sfx": "전환",
+        "transition_sfx_volume": 0.45,
     },
     # 고른 구간을 '편집'으로 만드는 단계. 자세한 근거는 editing.py 참고.
     "editing": {
@@ -125,6 +129,8 @@ DEFAULTS: dict[str, Any] = {
         "dead_air_keep": 0.12,     # 자른 자리에 남기는 여유 (말꼬리 보호)
         "dead_air_min_piece": 0.8, # 이보다 짧은 조각은 버린다
         "max_pieces": 400,         # 조각이 이보다 많아지면 기준을 완화
+        # 평균 컷 길이 목표(초). 점프컷이 너무 잘게 나누면 도로 붙인다. 0이면 안 맞춤
+        "target_cut_length": 0.0,
         "bridge_gaps": True,       # 가까운 하이라이트 사이는 자르지 말고 빨리 감아 잇는다
         "bridge_min": 1.5,
         "bridge_max": 25.0,        # 이보다 멀면 그냥 잘라낸다
@@ -133,8 +139,14 @@ DEFAULTS: dict[str, Any] = {
         "ramp_speed": 2.0,
         "ramp_min_duration": 2.5,
         "ramp_max_score": 0.35,
+        "zoom": True,              # 리액션 줌인
+        "zoom_min": 1.12,
+        "zoom_max": 1.35,
+        "zoom_per_minute": 0.0,    # 0 이면 빈도 제한 없이 피크마다
         "cold_open": True,         # 제일 센 장면을 맨 앞에 한 번 더
-        "cold_open_max": 5.0,
+        "cold_open_max": 5.0,      # 한 조각만 쓸 때의 길이
+        "cold_open_seconds": 0.0,  # 도입부 전체 길이 (0이면 위 값 하나만)
+        "cold_open_pieces": 1,     # 도입부를 몇 조각으로 구성할지
         "end_on_peak": True,       # 밋밋한 마지막 클립은 떼어낸다
     },
     "render": {

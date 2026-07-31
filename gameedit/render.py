@@ -90,10 +90,12 @@ def build_cut_filter(plan: EditPlan, cfg: dict, *, width: int, height: int,
         chain = [f"trim=start={start:.3f}:end={end:.3f}", "setpts=PTS-STARTPTS"]
         if speed > 1.0:
             chain.append(f"setpts=PTS/{speed:.4f}")
-        if punch_on and "punch" in clip.effects and punch > 1.0:
+        # 클립마다 배율을 따로 잡을 수 있다 (편집 스타일이 정한다). 0 이면 전역값.
+        amount = float(getattr(clip, "zoom", 0.0) or 0.0) or punch
+        if punch_on and "punch" in clip.effects and amount > 1.0:
             chain.append(
-                f"crop=trunc(iw/{punch:.3f}/2)*2:trunc(ih/{punch:.3f}/2)*2:"
-                f"(iw-trunc(iw/{punch:.3f}/2)*2)/2:(ih-trunc(ih/{punch:.3f}/2)*2)/2"
+                f"crop=trunc(iw/{amount:.3f}/2)*2:trunc(ih/{amount:.3f}/2)*2:"
+                f"(iw-trunc(iw/{amount:.3f}/2)*2)/2:(ih-trunc(ih/{amount:.3f}/2)*2)/2"
             )
         chain.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
         chain.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black")

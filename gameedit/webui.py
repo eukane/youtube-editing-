@@ -149,6 +149,10 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
     <h2>완성본 길이</h2>
     <div class="chips" id="lens"></div>
 
+    <h2>편집 스타일</h2>
+    <div class="chips" id="styles"></div>
+    <div class="muted" id="style-hint" style="margin:6px 2px 0"></div>
+
     <h2>편집 강도</h2>
     <div class="chips" id="paces"></div>
     <div class="muted" id="pace-hint" style="margin:6px 2px 0"></div>
@@ -310,6 +314,14 @@ const esc = (s) => String(s||'').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;',
 
 /* ---------------- 옵션 ---------------- */
 const LENGTHS = [3,5,10,15,20];
+const STYLES = [
+  ['','없음','기본 설정으로 편집합니다'],
+  ['anmori','안모리','평균 컷 2.2초 · 줌 1.2~1.5배 · 무음 0.15초부터 제거'],
+  ['seungsangsing','승상싱','평균 컷 1.6초 · 줌 최대 4배 · 초고압축'],
+  ['kangjiwon','강지원','평균 컷 2.8초 · 교전만 조임 · 무음 0.8초부터'],
+  ['bate','바테','평균 컷 2.1초 · 줌 2.5배 고정 · 자막 1줄'],
+  ['baljep','발젭','평균 컷 1.8초 · 매 컷 효과음 · 무음 0.1초부터'],
+];
 const PACES = [
   ['loose','여유', '말 사이 호흡을 남깁니다. 토크가 많은 영상용'],
   ['normal','기본', '죽은 시간만 잘라냅니다'],
@@ -322,6 +334,10 @@ function openOptions(file){
   $('opt-size').textContent = file.size_mb ? file.size_mb + ' MB' : '';
   $('lens').innerHTML = LENGTHS.map(n =>
     `<div class="chip ${n===state.target?'on':''}" onclick="setLen(${n})">${n}분</div>`).join('');
+  state.style = state.style || '';
+  $('styles').innerHTML = STYLES.map(([id,name]) =>
+    `<div class="chip ${id===state.style?'on':''}" onclick="setStyle('${id}')">${name}</div>`).join('');
+  setStyle(state.style);
   $('paces').innerHTML = PACES.map(([id,name]) =>
     `<div class="chip ${id===state.pace?'on':''}" onclick="setPace('${id}')">${name}</div>`).join('');
   setPace(state.pace);
@@ -331,6 +347,13 @@ function setLen(n){
   state.target = n;
   document.querySelectorAll('#lens .chip').forEach((c,i) =>
     c.classList.toggle('on', LENGTHS[i]===n));
+}
+function setStyle(id){
+  state.style = id;
+  document.querySelectorAll('#styles .chip').forEach((c,i) =>
+    c.classList.toggle('on', STYLES[i][0]===id));
+  const hit = STYLES.find(s => s[0]===id);
+  $('style-hint').textContent = hit ? hit[2] : '';
 }
 function setPace(id){
   state.pace = id;
@@ -357,6 +380,7 @@ async function startJob(){
         no_subtitles: !$('sw-sub').classList.contains('on'),
         shorts: $('sw-shorts').classList.contains('on'),
         pace: state.pace || 'normal',
+        style: state.style || '',
       })
     });
     openJob(job.id);

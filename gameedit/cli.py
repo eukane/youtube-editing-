@@ -62,6 +62,14 @@ def load_config(args) -> Config:
     profile = getattr(args, "profile", "")
     if profile:
         config = config.with_profile(profile)
+    style = getattr(args, "style", "")
+    if style:
+        from .styles import describe, get as get_style
+        for key, value in get_style(style).items():
+            config.set(key, value)
+        note = describe(style)
+        if note:
+            log(f"편집 스타일: {note}")
     for override in getattr(args, "set", None) or []:
         if "=" not in override:
             raise SystemExit(f"--set 형식이 잘못됐습니다 (key=value): {override}")
@@ -501,6 +509,8 @@ def _yaml_quote(text: str) -> str:
 def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-c", "--config", help="설정 파일 경로 (기본: ./gameedit.yaml)")
     parser.add_argument("-w", "--work", help="작업 폴더 경로")
+    parser.add_argument("--style", default="",
+                        help="편집 스타일 프리셋 (anmori/seungsangsing/kangjiwon/bate/baljep)")
     parser.add_argument("--set", action="append", metavar="KEY=VALUE",
                         help="설정 개별 덮어쓰기 (예: --set highlight.target_duration=600)")
     parser.add_argument("--profile", choices=sorted(PROFILES), default="",

@@ -7,8 +7,8 @@ import pytest
 
 from gameedit.config import Config
 from gameedit.editing import (apply_editing, apply_speed_ramps, bridge_gaps,
-                              pick_cold_open, remove_dead_air, split_dead_air,
-                              trim_flat_tail)
+                              enforce_cut_length, pick_cold_open, remove_dead_air,
+                              split_dead_air, trim_flat_tail)
 from gameedit.models import Clip
 from gameedit.plan import build_plan
 
@@ -100,20 +100,67 @@ def test_cold_open_puts_the_best_moment_first(ecfg):
              Clip(source_start=100.0, source_end=130.0, score=0.95)]
 
     hook = pick_cold_open(clips, ecfg)
-    assert hook is not None
-    assert hook.source_start == 100.0                      # 제일 센 장면
-    assert hook.duration <= ecfg["cold_open_max"]
-    assert "punch" in hook.effects
+    assert len(hook) == 1
+    assert hook[0].source_start == 100.0                   # 제일 센 장면
+    assert hook[0].duration <= ecfg["cold_open_max"]
+    assert "punch" in hook[0].effects
 
 
 def test_cold_open_is_skipped_when_there_is_only_one_clip(ecfg):
-    assert pick_cold_open([Clip(source_start=0.0, source_end=9.0, score=1.0)], ecfg) is None
+    assert pick_cold_open([Clip(source_start=0.0, source_end=9.0, score=1.0)], ecfg) == []
 
 
 def test_cold_open_can_be_turned_off(ecfg):
     clips = [Clip(source_start=0.0, source_end=20.0, score=0.2),
              Clip(source_start=100.0, source_end=130.0, score=0.9)]
-    assert pick_cold_open(clips, dict(ecfg, cold_open=False)) is None
+    assert pick_cold_open(clips, dict(ecfg, cold_open=False)) == []
+
+
+def test_long_intro_is_built_from_several_scenes(ecfg):
+    """30초짜리 도입부는 한 장면을 30초 트는 게 아니라 여러 장면을 몰아 보여 준다."""
+    clips = [Clip(source_start=i * 100.0, source_end=i * 100.0 + 40.0, score=0.9 - i * 0.1)
+             for i in range(5)]
+
+    hook = pick_cold_open(clips, dict(ecfg, cold_open_seconds=30.0, cold_open_pieces=4),
+                          source_duration=600.0)
+    assert len(hook) == 4
+    assert sum(c.duration for c in hook) == pytest.approx(30.0)
+    assert [c.source_start for c in hook] == [0.0, 100.0, 200.0, 300.0]   # 센 순서대로
+    assert all(c.reason == "coldopen" for c in hook)
+
+
+def test_intro_is_cut_fresh_from_the_source_not_from_the_fragments(ecfg):
+    """본편은 점프컷으로 잘게 쪼개져 있다. 그 조각을 쓰면 길이가 안 나온다."""
+    clips = [Clip(source_start=100.0 + i * 3.0, source_end=102.0 + i * 3.0, score=0.9)
+             for i in range(4)]                       # 2초짜리 조각들
+    clips.append(Clip(source_start=400.0, source_end=402.0, score=0.5))
+
+    hook = pick_cold_open(clips, dict(ecfg, cold_open_seconds=16.0, cold_open_pieces=2),
+                          source_duration=600.0)
+    assert sum(c.duration for c in hook) == pytest.approx(16.0), "조각 길이에 갇혔다"
+    assert all(c.source_duration == 8.0 for c in hook)
+
+
+def test_intro_does_not_repeat_the_same_moment(ecfg):
+    """붙어 있는 조각 다섯 개를 뽑으면 같은 장면을 다섯 번 보여 주게 된다."""
+    clips = [Clip(source_start=100.0 + i * 2.0, source_end=102.0 + i * 2.0, score=0.9)
+             for i in range(6)]                       # 전부 같은 장면의 조각
+    clips.append(Clip(source_start=500.0, source_end=510.0, score=0.4))
+
+    hook = pick_cold_open(clips, dict(ecfg, cold_open_seconds=20.0, cold_open_pieces=4),
+                          source_duration=600.0)
+    starts = [c.source_start for c in hook]
+    assert len(starts) == len(set(starts))
+    for a, b in zip(sorted(starts), sorted(starts)[1:]):
+        assert b - a >= 5.0, f"도입부에 같은 장면이 두 번 들어갔다: {starts}"
+
+
+def test_intro_never_runs_past_the_end_of_the_source(ecfg):
+    clips = [Clip(source_start=95.0, source_end=100.0, score=0.9),
+             Clip(source_start=10.0, source_end=20.0, score=0.5)]
+    hook = pick_cold_open(clips, dict(ecfg, cold_open_seconds=40.0, cold_open_pieces=2),
+                          source_duration=100.0)
+    assert all(c.source_end <= 100.0 for c in hook)
 
 
 # ------------------------------------------------------------------ 끝맺음
@@ -239,3 +286,37 @@ def test_bridging_can_be_turned_off(ecfg):
     clips = [Clip(source_start=0.0, source_end=10.0),
              Clip(source_start=30.0, source_end=40.0)]
     assert len(bridge_gaps(clips, dict(ecfg, bridge_gaps=False))) == 2
+
+
+# ------------------------------------------------------- 평균 컷 길이 맞추기
+
+def test_over_cut_pieces_are_merged_back_to_the_target():
+    """숨을 자주 쉬면 0.5초 조각이 수십 개 나온다. 규격에 맞춰 도로 붙인다."""
+    clips = [Clip(source_start=i * 0.7, source_end=i * 0.7 + 0.5, score=0.5)
+             for i in range(40)]                       # 평균 0.5초
+    out = enforce_cut_length(clips, 2.2)
+
+    avg = sum(c.source_duration for c in out) / len(out)
+    assert 1.9 <= avg <= 3.2, f"목표 2.2초에 못 맞췄다: {avg:.2f}"
+    assert len(out) < len(clips)
+    assert out == sorted(out, key=lambda c: c.source_start)
+
+
+def test_already_long_enough_clips_are_left_alone():
+    clips = [Clip(source_start=i * 20.0, source_end=i * 20.0 + 8.0) for i in range(5)]
+    assert enforce_cut_length(clips, 2.2) == clips
+
+
+def test_merging_never_swallows_a_bridge():
+    """빨리감기 다리를 보통 속도 클립에 합치면 속도가 뒤섞인다."""
+    clips = [Clip(source_start=0.0, source_end=0.5),
+             Clip(source_start=0.6, source_end=10.0, reason="bridge", speed=8.0),
+             Clip(source_start=10.1, source_end=10.6)]
+    out = enforce_cut_length(clips, 5.0)
+    bridges = [c for c in out if c.reason == "bridge"]
+    assert len(bridges) == 1 and bridges[0].speed == 8.0
+
+
+def test_target_zero_disables_merging():
+    clips = [Clip(source_start=i * 0.7, source_end=i * 0.7 + 0.5) for i in range(10)]
+    assert enforce_cut_length(clips, 0.0) == clips

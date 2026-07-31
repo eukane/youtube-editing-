@@ -156,6 +156,7 @@ class Clip:
     effects: list[str] = field(default_factory=list)  # punch / fadein / fadeout ...
     out_start: float = 0.0  # 결과물 타임라인상의 시작 시각 (plan 빌드 시 계산)
     speed: float = 1.0      # 1.0 보다 크면 빨리감기 (이동 구간 등)
+    zoom: float = 0.0       # 0 이면 render 의 punch_amount 를 쓴다
 
     @property
     def source_duration(self) -> float:

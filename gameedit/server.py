@@ -128,6 +128,15 @@ EDIT_PACE: dict[str, dict] = {
 }
 
 
+def resolve_style(value) -> str:
+    """편집 스타일 이름도 화면에서 오니 검증한다. 빈 값이면 스타일 없음."""
+    from .styles import STYLES, resolve
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    key = resolve(value)
+    return key if key in STYLES else ""
+
+
 def resolve_pace(value) -> str:
     """화면에서 온 값은 못 믿는다. 모르는 값이면 기본으로."""
     return value if isinstance(value, str) and value in EDIT_PACE else "normal"
@@ -231,6 +240,14 @@ class JobManager:
             config.set("project.resolution", "1080x1920")
         for key, value in EDIT_PACE.get(job.options.get("pace") or "", {}).items():
             config.set(key, value)
+        style = job.options.get("style") or ""
+        if style:
+            from .styles import get as get_style
+            try:
+                for key, value in get_style(style).items():
+                    config.set(key, value)
+            except ValueError:
+                pass          # 모르는 이름이면 그냥 무시 (기본 설정으로 간다)
         return config
 
     def _run(self, job: Job, *, render_only: bool = False) -> None:
@@ -711,6 +728,7 @@ class Handler(BaseHTTPRequestHandler):
             "no_subtitles": bool(data.get("no_subtitles")),
             "shorts": bool(data.get("shorts")),
             "pace": resolve_pace(data.get("pace")),
+            "style": resolve_style(data.get("style")),
         }
         job = self.manager.create(source, options)
         self._send_json(job.as_dict())

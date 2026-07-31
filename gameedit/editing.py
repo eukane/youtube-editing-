@@ -110,6 +110,47 @@ def remove_dead_air(clips: list[Clip], silences, cfg: dict) -> list[Clip]:
     return out
 
 
+def enforce_cut_length(clips: list[Clip], target: float) -> list[Clip]:
+    """평균 컷 길이를 목표에 맞춘다.
+
+    점프컷은 무음이 나올 때마다 자르기 때문에, 숨을 자주 쉬는 사람이면
+    0.5초짜리 조각이 수십 개 나온다. '평균 컷 2.2초' 같은 스타일 규격을
+    맞추려면 너무 잘게 나뉜 조각은 **도로 붙여야** 한다.
+
+    붙이는 순서는 '사이가 가장 좁은 곳' 부터다. 원본에서 거의 안 떨어진
+    두 조각을 먼저 합쳐야 티가 안 난다.
+    """
+    if target <= 0 or len(clips) < 2:
+        return clips
+
+    while True:
+        durations = [c.source_duration for c in clips]
+        if not durations or sum(durations) / len(durations) >= target * 0.9:
+            break
+        # 이어 붙일 수 있는 이웃 중 사이가 가장 좁은 쌍을 찾는다
+        best, best_gap = -1, None
+        for i in range(len(clips) - 1):
+            a, b = clips[i], clips[i + 1]
+            if a.reason == "bridge" or b.reason == "bridge":
+                continue
+            if a.speed != b.speed:
+                continue
+            gap = b.source_start - a.source_end
+            if gap < 0:
+                continue
+            if best_gap is None or gap < best_gap:
+                best, best_gap = i, gap
+        if best < 0:
+            break
+        a, b = clips[best], clips[best + 1]
+        merged = Clip(source_start=a.source_start, source_end=b.source_end,
+                      score=max(a.score, b.score), reason=a.reason or b.reason,
+                      label=a.label or b.label, speed=a.speed, zoom=a.zoom or b.zoom,
+                      effects=sorted(set(a.effects) | set(b.effects)))
+        clips = [*clips[:best], merged, *clips[best + 2:]]
+    return clips
+
+
 def _has_speech(analysis: Analysis, start: float, end: float) -> bool:
     for word in analysis.transcript.words():
         if word.end > start and word.start < end:
@@ -177,25 +218,88 @@ def bridge_gaps(clips: list[Clip], cfg: dict) -> list[Clip]:
     return out
 
 
-def pick_cold_open(clips: list[Clip], cfg: dict) -> Clip | None:
-    """맨 앞에 한 번 더 보여 줄 '가장 센 3~5초'를 잘라낸다."""
+def apply_zooms(clips: list[Clip], cfg: dict) -> list[Clip]:
+    """리액션 줌인을 **정해진 빈도로** 건다.
+
+    지금까지는 오디오 피크마다 무조건 걸어서, 시끄러운 영상이면 계속 확대된
+    채로 흘러갔다. 편집자들은 분당 몇 번 쓸지를 정해 놓고 센 순간에만 쓴다.
+    점수가 높을수록 더 크게 당긴다.
+    """
+    if not cfg.get("zoom", True):
+        for clip in clips:
+            clip.effects[:] = [e for e in clip.effects if e != "punch"]
+        return clips
+
+    lo = float(cfg.get("zoom_min", 1.12))
+    hi = max(lo, float(cfg.get("zoom_max", 1.35)))
+    per_minute = float(cfg.get("zoom_per_minute", 0.0))
+    if per_minute <= 0:                      # 빈도를 안 정했으면 예전처럼 둔다
+        for clip in clips:
+            if "punch" in clip.effects and not clip.zoom:
+                clip.zoom = lo
+        return clips
+
+    out_minutes = sum(c.duration for c in clips) / 60.0
+    budget = max(1, round(per_minute * out_minutes))
+
+    ranked = sorted((c for c in clips if c.reason != "bridge"),
+                    key=lambda c: c.score, reverse=True)
+    chosen = ranked[:budget]
+    top = max((c.score for c in chosen), default=0.0)
+    bottom = min((c.score for c in chosen), default=0.0)
+
+    for clip in clips:
+        clip.effects[:] = [e for e in clip.effects if e != "punch"]
+        clip.zoom = 0.0
+    for clip in chosen:
+        # 제일 센 클립이 hi, 나머지는 점수에 비례해 lo~hi 사이
+        ratio = 1.0 if top <= bottom else (clip.score - bottom) / (top - bottom)
+        clip.zoom = round(lo + (hi - lo) * ratio, 3)
+        clip.effects.append("punch")
+    return clips
+
+
+def pick_cold_open(clips: list[Clip], cfg: dict, *, source_duration: float = 0.0) -> list[Clip]:
+    """맨 앞에 붙일 도입부(하이라이트 선공개)를 만든다.
+
+    한 장면만 5초 보여 주는 것과, 자극적인 장면 네 개를 30초에 걸쳐 몰아
+    보여 주는 것은 완전히 다른 도입부다. 스타일마다 길이와 개수를 정한다.
+
+    도입부는 **원본에서 새로 잘라낸다.** 본편은 점프컷으로 잘게 쪼개져 있어서
+    그 조각을 그대로 쓰면 요청한 길이가 절대 안 나온다. 그리고 서로 멀리
+    떨어진 장면만 고른다. 안 그러면 한 장면의 앞뒤 조각 다섯 개가 뽑혀
+    같은 화면을 다섯 번 보여 주게 된다.
+    """
     if not cfg.get("cold_open", True) or len(clips) < 2:
-        return None
+        return []
 
-    length = float(cfg.get("cold_open_max", 5.0))
-    if length <= 0:
-        return None
+    pieces = max(1, int(cfg.get("cold_open_pieces", 1)))
+    total = float(cfg.get("cold_open_seconds", 0.0))
+    per_piece = total / pieces if total > 0 else float(cfg.get("cold_open_max", 5.0))
+    if per_piece <= 0:
+        return []
 
-    best = max(clips, key=lambda c: c.score)
-    if best.score <= 0:
-        return None
-    # 원본에서 이미 짧으면 그대로, 길면 앞쪽을 쓴다 (봉우리가 앞에 오도록 고른 구간이라)
-    end = min(best.source_end, best.source_start + length)
-    if end - best.source_start < 1.0:
-        return None
-    return Clip(source_start=best.source_start, source_end=round(end, 3),
-                score=best.score, reason="coldopen", label="",
-                effects=["coldopen", "punch"])
+    limit = source_duration or max((c.source_end for c in clips), default=0.0)
+    ranked = [c for c in sorted(clips, key=lambda c: c.score, reverse=True)
+              if c.score > 0 and c.reason != "bridge"]
+
+    hook: list[Clip] = []
+    used: list[float] = []
+    apart = max(per_piece, 10.0)          # 서로 이만큼은 떨어진 장면끼리
+    for clip in ranked:
+        if len(hook) >= pieces:
+            break
+        if any(abs(clip.source_start - t) < apart for t in used):
+            continue
+        end = min(limit, clip.source_start + per_piece) if limit else \
+            clip.source_start + per_piece
+        if end - clip.source_start < 0.8:
+            continue
+        used.append(clip.source_start)
+        hook.append(Clip(source_start=clip.source_start, source_end=round(end, 3),
+                         score=clip.score, reason="coldopen", label="",
+                         effects=["coldopen", "punch"], zoom=clip.zoom))
+    return hook
 
 
 def trim_flat_tail(clips: list[Clip], cfg: dict) -> list[Clip]:
@@ -226,19 +330,20 @@ def apply_editing(clips: list[Clip], analysis: Analysis, cfg: dict) -> list[Clip
     keep_whole = [c for c in clips if c.reason == "bridge"]
     cuttable = [c for c in clips if c.reason != "bridge"]
     cut = remove_dead_air(cuttable, analysis.audio.silences, cfg)
+    cut = enforce_cut_length(cut, float(cfg.get("target_cut_length", 0.0)))
     cut = apply_speed_ramps(cut, analysis, cfg)
     clips = sorted([*cut, *keep_whole], key=lambda c: c.source_start)
+    clips = apply_zooms(clips, cfg)
 
-    hook = pick_cold_open(clips, cfg)
-    if hook is not None:
-        clips = [hook, *clips]
-    return clips
+    hook = pick_cold_open(clips, cfg, source_duration=analysis.media.duration)
+    return [*hook, *clips]
 
 
 def editing_summary(clips: list[Clip], cfg: dict) -> dict:
     """무엇을 했는지 사람이 볼 수 있게."""
     return {
         "cold_open": any("coldopen" in c.effects for c in clips),
+        "cold_open_pieces": sum(1 for c in clips if c.reason == "coldopen"),
         "bridges": sum(1 for c in clips if c.reason == "bridge"),
         "jump_cuts": max(0, len(clips) - 1),
         "sped_up": sum(1 for c in clips if c.speed > 1.0),
