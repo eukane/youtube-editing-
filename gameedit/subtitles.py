@@ -162,6 +162,7 @@ def build_subtitle_cues(plan: EditPlan, analysis: Analysis, cfg: dict) -> list[S
     impact = bool(cfg.get("impact", True))
     impact_threshold = float(cfg.get("impact_threshold", 0.88))
     impact_max_chars = int(cfg.get("impact_max_chars", 14))
+    word_list = _as_word_list(cfg.get("highlight_words", []))
 
     cues: list[SubtitleCue] = []
     for seg in analysis.transcript.segments:
@@ -173,6 +174,10 @@ def build_subtitle_cues(plan: EditPlan, analysis: Analysis, cfg: dict) -> list[S
             level = analysis.audio.mean_between(start, end)
             if emphasis and level >= threshold:
                 style = "Emph"
+            # 줄 전체를 노랗게 칠해 버리면 "바로 |전구 폼 로토무!" 처럼 한 구절만
+            # 색을 바꾸는 연출이 묻힌다. 강조 단어가 있으면 바탕은 흰색으로 둔다.
+            if style == "Emph" and any(w in text for w in word_list):
+                style = "Main"
             # 제일 센 대사는 화면을 채우는 초대형 자막으로 (실제 편집본의 그 자막)
             if impact and level >= impact_threshold and len(text) <= impact_max_chars:
                 style = "Impact"
@@ -272,6 +277,14 @@ def _card_style_line(name: str, *, font: str, size: int, primary: str) -> str:
     )
 
 
+def with_title_card(sub_cfg: dict, project_cfg: dict) -> dict:
+    """타이틀 카드 설정은 project 섹션에 있고 자막은 subtitles 섹션이 그린다."""
+    return dict(sub_cfg,
+                title=project_cfg.get("title", ""),
+                title_date=project_cfg.get("title_date", ""),
+                title_seconds=project_cfg.get("title_seconds", 2.5))
+
+
 def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
               *, width: int = 1920, height: int = 1080) -> str:
     width, height = reference_resolution(width, height)
@@ -288,11 +301,17 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     emphasis_color = cfg.get("emphasis_color", "&H0033E8FF")
     align = _ALIGN.get(cfg.get("position", "bottom"), 2)
     pop = bool(cfg.get("pop_animation", True))
-    impact_color = cfg.get("impact_color", "&H002020F0")   # ASS 는 BGR — 빨강
     impact_scale = float(cfg.get("impact_scale", 2.7))
     impact_margin_v = int(cfg.get("impact_margin_v", 0) or 0)
     word_color = cfg.get("word_color", emphasis_color)
     word_list = _as_word_list(cfg.get("highlight_words", []))
+    # 강조색은 한 가지가 아니라 줄마다 돌려 쓴다 (캡처에서 확인)
+    palette = _as_word_list(cfg.get("impact_colors", [])) or ["&H002020F0"]
+    if cfg.get("impact_color"):
+        palette = [cfg["impact_color"]]
+    impact_color = palette[0]
+    two_tier = bool(cfg.get("two_tier", False))
+    two_tier_gap = float(cfg.get("two_tier_gap", 3.0))
 
     header = [
         "[Script Info]",
@@ -335,6 +354,23 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
         _style_line("Narr", font=font, size=int(size * 0.78), primary="&H0000E8FF",
                     outline_color=outline_color, bold=-1, outline=max(1.5, outline - 1.5),
                     shadow=1, align=8, margin_v=int(height * 0.30)),
+        # 2단 자막의 윗줄 (직전 대사를 작게 남긴다)
+        _style_line("Prev", font=font, size=int(size * impact_scale * 0.42),
+                    primary="&H00FFFFFF", outline_color="&H00000000", bold=-1,
+                    outline=outline * 1.4, shadow=shadow,
+                    align=2,
+                    margin_v=(impact_margin_v or max(20, int(margin_v * 0.5)))
+                    + int(size * impact_scale * 1.15),
+                    margin_l=24, margin_r=24),
+        # 타이틀 카드: 검은 화면 + 노란 날짜 + 흰 제목
+        _style_line("TitleDate", font=font, size=int(size * 0.95), primary="&H0000E8FF",
+                    outline_color="&H00000000", bold=-1, outline=outline, shadow=0,
+                    align=5, margin_v=int(height * 0.10)),
+        _style_line("TitleName", font=font, size=int(size * 1.35), primary="&H00FFFFFF",
+                    outline_color="&H00000000", bold=-1, outline=outline, shadow=0,
+                    align=5, margin_v=0),
+        f"Style: TitleBg,{font},10,&H00000000,&H000000FF,&H00000000,&H00000000,"
+        f"0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -342,12 +378,30 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
 
     events: list[tuple[float, str]] = []
 
+    # 타이틀 카드 — 영상 맨 앞에 검은 화면을 깔고 날짜·제목을 얹는다
+    title = str(cfg.get("title", "") or "")
+    if title:
+        card_end = max(0.6, float(cfg.get("title_seconds", 2.5)))
+        events.append((-1.0,
+                       f"Dialogue: 5,{_ass_time(0.0)},{_ass_time(card_end)},TitleBg,card,"
+                       f"0,0,0,,{{\\p1\\an7\\pos(0,0)}}m 0 0 l {int(width)} 0 "
+                       f"{int(width)} {int(height)} 0 {int(height)}{{\\p0}}"))
+        date = str(cfg.get("title_date", "") or "")
+        if date:
+            events.append((-0.9,
+                           f"Dialogue: 6,{_ass_time(0.15)},{_ass_time(card_end)},TitleDate,"
+                           f"card,0,0,0,,{{\\fad(150,200)}}{escape_ass(date)}"))
+        events.append((-0.8,
+                       f"Dialogue: 6,{_ass_time(0.15)},{_ass_time(card_end)},TitleName,"
+                       f"card,0,0,0,,{{\\fad(150,200)}}{escape_ass(title)}"))
+
     fade_main = "{\\fad(80,80)}" if pop else ""
     fade_emph = ("{\\fad(60,60)\\t(0,120,\\fscx115\\fscy115)\\t(120,260,\\fscx100\\fscy100)}"
                  if pop else "")
     fade_impact = ("{\\fad(50,120)\\t(0,110,\\fscx125\\fscy125)\\t(110,240,\\fscx100\\fscy100)}"
                    if pop else "{\\fad(50,120)}")
-    for cue in cues:
+    impact_seen = 0
+    for i, cue in enumerate(cues):
         if cue.end <= cue.start:
             continue
         if cue.style == "Impact":
@@ -357,8 +411,22 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
         else:
             tag = fade_main
         text = escape_ass("\n".join(cue.lines))
-        # 초대형 자막은 그 자체로 눈에 띄니 단어 색을 또 바꾸지 않는다
-        if cue.style != "Impact":
+        if cue.style == "Impact":
+            # 줄마다 색을 바꿔 쓴다. 같은 색이 계속 나오면 금방 질린다.
+            colour = palette[impact_seen % len(palette)]
+            impact_seen += 1
+            if colour != impact_color:
+                tag += f"{{\\c{colour}&}}"
+            # 2단 자막: 직전 대사를 작게 위에 남겨 둔다
+            prev = cues[i - 1] if i else None
+            if (two_tier and prev is not None and prev.style != "Impact"
+                    and 0 <= cue.start - prev.end <= two_tier_gap):
+                events.append((cue.start,
+                               f"Dialogue: 0,{_ass_time(cue.start)},{_ass_time(cue.end)},"
+                               f"Prev,{prev.speaker},0,0,0,,"
+                               f"{fade_main}{escape_ass(' '.join(prev.lines))}"))
+        else:
+            # 초대형 자막은 그 자체로 눈에 띄니 단어 색을 또 바꾸지 않는다
             text = colorize_words(text, word_list, word_color)
         events.append((cue.start,
                        f"Dialogue: 0,{_ass_time(cue.start)},{_ass_time(cue.end)},{cue.style},"

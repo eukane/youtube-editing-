@@ -18,7 +18,7 @@ from .models import Analysis, EditPlan, analysis_from_dict, load_json, save_json
 from .plan import build_plan, load_plan
 from .render import render
 from .srt import write_srt
-from .subtitles import write_ass
+from .subtitles import with_title_card, write_ass
 from .timeline import write_html
 
 DURATION_RE = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s?)?$", re.IGNORECASE)
@@ -134,7 +134,7 @@ def write_plan_outputs(plan: EditPlan, analysis: Analysis | None, config: Config
     outputs: dict[str, Path] = {}
     outputs["plan"] = save_json(plan, work_dir / "plan.json")
 
-    sub_cfg = config.section("subtitles")
+    sub_cfg = with_title_card(config.section("subtitles"), config.section("project"))
     width = plan.media.width or 1920
     height = plan.media.height or 1080
     resolution = (config.get("project.resolution") or "").lower()

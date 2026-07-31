@@ -31,7 +31,7 @@ from .media import extract_thumbnail, format_timecode
 from .models import EditPlan, analysis_from_dict, load_json, plan_from_dict, save_json
 from .plan import build_plan
 from .render import render
-from .subtitles import write_ass
+from .subtitles import with_title_card, write_ass
 from .webui import PAGE
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".ts", ".flv"}
@@ -304,7 +304,7 @@ class JobManager:
         return plan
 
     def _render(self, job: Job, config: Config, plan: EditPlan, work_dir: Path, log) -> None:
-        sub_cfg = config.section("subtitles")
+        sub_cfg = with_title_card(config.section("subtitles"), config.section("project"))
         ass_path = None
         if sub_cfg.get("enabled", True) or plan.memes:
             ass_path = write_ass(work_dir / "subtitles.ass", plan.subtitles, plan.memes,

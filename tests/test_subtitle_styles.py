@@ -62,9 +62,7 @@ def test_impact_style_exists_and_is_much_bigger(scfg):
 
     assert size("Impact") > size("Main") * 2.5      # 캡처에서 잰 비율
     assert size("Narr") < size("Main")
-    # 빨간 글씨 + 검은 외곽선
-    assert "&H002020F0" in styles["Impact"]
-    assert styles["Impact"].split(",")[5] == "&H00000000"
+    assert styles["Impact"].split(",")[5] == "&H00000000"      # 두꺼운 검은 외곽선
 
 
 def test_impact_scale_is_configurable(scfg):
@@ -138,3 +136,109 @@ def test_impact_margin_can_be_pushed_into_a_letterbox_band(scfg):
 
     assert margin(build_ass([], [], dict(scfg, impact_margin_v=140))) == 140
     assert margin(build_ass([], [], scfg)) > 0        # 0 이면 자동값
+
+
+# ------------------------------- 캡처에서 확인한 것들 (강조색 로테이션·2단·타이틀)
+
+def _impact_cues(n):
+    return [SubtitleCue(start=i * 3.0, end=i * 3.0 + 2.0, lines=[f"대사{i}"], style="Impact")
+            for i in range(n)]
+
+
+def test_impact_colour_rotates_between_lines(scfg):
+    """캡처를 보면 마젠타·주황·빨강·흰색을 줄마다 바꿔 쓴다."""
+    ass = build_ass(_impact_cues(4), [], scfg)
+    dialogue = [x for x in ass.splitlines() if x.startswith("Dialogue:") and "Impact" in x]
+    assert len(dialogue) == 4
+
+    import re
+    overrides = {m.group(1) for x in dialogue
+                 for m in re.finditer(r"\\c(&H[0-9A-F]{8})&", x)}
+    assert len(overrides) >= 2, f"같은 색만 계속 나온다: {overrides}"
+
+
+def test_single_impact_colour_can_be_pinned(scfg):
+    ass = build_ass(_impact_cues(4), [], dict(scfg, impact_color="&H002020F0"))
+    dialogue = [x for x in ass.splitlines() if x.startswith("Dialogue:") and "Impact" in x]
+    assert not any("\\c&H" in x for x in dialogue)   # 스타일 색 그대로
+    assert "&H002020F0" in next(x for x in ass.splitlines()
+                                if x.startswith("Style: Impact,"))
+
+
+def test_two_tier_keeps_the_previous_line_above(scfg):
+    """캡처: 이전 줄은 작게 위, 현재 줄은 크게 아래."""
+    cues = [SubtitleCue(start=0.0, end=1.8, lines=["하다보니 재미있어서"], style="Main"),
+            SubtitleCue(start=2.0, end=4.0, lines=["개추~"], style="Impact")]
+    ass = build_ass(cues, [], dict(scfg, two_tier=True))
+
+    prev = [x for x in ass.splitlines() if ",Prev," in x]
+    assert len(prev) == 1
+    assert "하다보니 재미있어서" in prev[0]
+
+    styles = {x.split(",")[0].removeprefix("Style: "): x
+              for x in ass.splitlines() if x.startswith("Style: ")}
+    assert int(styles["Prev"].split(",")[2]) < int(styles["Impact"].split(",")[2])
+    assert int(styles["Prev"].split(",")[-2]) > int(styles["Impact"].split(",")[-2])
+
+
+def test_two_tier_ignores_a_distant_previous_line(scfg):
+    cues = [SubtitleCue(start=0.0, end=1.0, lines=["한참 전 대사"], style="Main"),
+            SubtitleCue(start=30.0, end=32.0, lines=["개추~"], style="Impact")]
+    ass = build_ass(cues, [], dict(scfg, two_tier=True, two_tier_gap=3.0))
+    assert ",Prev," not in ass
+
+
+def test_two_tier_is_off_by_default(scfg):
+    cues = [SubtitleCue(start=0.0, end=1.8, lines=["앞줄"], style="Main"),
+            SubtitleCue(start=2.0, end=4.0, lines=["개추~"], style="Impact")]
+    assert ",Prev," not in build_ass(cues, [], scfg)
+
+
+def test_title_card_draws_black_then_date_then_title(scfg):
+    """캡처: 검은 화면 + 노란 날짜 + 흰 제목."""
+    ass = build_ass([], [], dict(scfg, title="방송 시작전 썰 모음",
+                                 title_date="2024. 03. 20 (수)", title_seconds=2.5))
+    assert ",TitleBg," in ass and "m 0 0 l" in ass       # 전체 화면 검은 판
+    assert "2024. 03. 20 (수)" in ass and ",TitleDate," in ass
+    assert "방송 시작전 썰 모음" in ass and ",TitleName," in ass
+
+    styles = {x.split(",")[0].removeprefix("Style: "): x
+              for x in ass.splitlines() if x.startswith("Style: ")}
+    assert styles["TitleDate"].split(",")[3] == "&H0000E8FF"    # 노랑
+    assert styles["TitleName"].split(",")[3] == "&H00FFFFFF"    # 흰색
+
+
+def test_no_title_card_when_not_configured(scfg):
+    assert ",TitleBg," not in build_ass([], [], scfg)
+
+
+def test_title_card_without_a_date_still_works(scfg):
+    ass = build_ass([], [], dict(scfg, title="제목만"))
+    assert ",TitleName," in ass and ",TitleDate," not in ass
+
+
+def test_with_title_card_pulls_from_the_project_section():
+    from gameedit.subtitles import with_title_card
+
+    config = Config()
+    config.set("project.title", "오늘의 방송")
+    config.set("project.title_date", "2026. 07. 31")
+    merged = with_title_card(config.section("subtitles"), config.section("project"))
+    assert merged["title"] == "오늘의 방송"
+    assert merged["title_date"] == "2026. 07. 31"
+    assert merged["max_lines"] == config.section("subtitles")["max_lines"]
+
+
+def test_phrase_colour_wins_over_whole_line_emphasis(scfg):
+    """줄 전체를 노랗게 칠하면 '바로 |전구 폼 로토무!' 의 대비가 사라진다."""
+    styles = _styles_for("바로 전구 폼 로토무!", 0.8, scfg,
+                         highlight_words=["전구 폼 로토무"])
+    assert styles == ["Main"], "강조 단어가 있는 줄은 바탕을 흰색으로 둬야 한다"
+
+    # 강조 단어가 없으면 평소대로 Emph
+    assert _styles_for("그냥 큰 소리", 0.8, scfg, highlight_words=["없는말"]) == ["Emph"]
+
+
+def test_multi_word_phrase_is_coloured_as_one_block():
+    out = colorize_words("바로 전구 폼 로토무!", ["전구 폼 로토무"], "&H002090F0")
+    assert out.startswith("바로 {\\c&H002090F0&}전구 폼 로토무{\\c}")

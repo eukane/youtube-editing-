@@ -25,6 +25,10 @@ DEFAULTS: dict[str, Any] = {
         "resolution": "",  # 비우면 원본 해상도 유지
         "max_resolution": "",  # 이보다 크면 줄인다 (작은 영상을 늘리지는 않음)
         "fps": 0,  # 0이면 원본 fps 유지
+        # 맨 앞 타이틀 카드 (검은 화면 + 노란 날짜 + 흰 제목). 비우면 안 넣는다.
+        "title": "",
+        "title_date": "",
+        "title_seconds": 2.5,
     },
     "analyze": {
         "scene_threshold": 0.35,
@@ -104,7 +108,12 @@ DEFAULTS: dict[str, Any] = {
         "impact_max_chars": 14,     # 이보다 길면 초대형으로 안 뺀다
         # 2.7 = 실제 편집본 캡처에서 잰 '글자 폭 화면의 71%' 와 일치하는 값
         "impact_scale": 2.7,
-        "impact_color": "&H002020F0",   # ASS 는 BGR — 빨강
+        # 캡처를 보면 강조색이 하나가 아니다. 줄마다 돌려 쓴다. (ASS 는 BGR)
+        "impact_colors": ["&H00E020E0", "&H002020F0", "&H002090F0", "&H00FFFFFF"],
+        "impact_color": "",         # 하나로 고정하고 싶을 때만
+        # 이전 줄을 작게 위에 남기고 현재 줄을 크게 아래에 (캡처의 2단 자막)
+        "two_tier": False,
+        "two_tier_gap": 3.0,        # 앞 자막이 이 시간 안에 끝났을 때만
         # 0 이면 margin_v 의 절반. 레터박스를 켰다면 검은 띠 안에 들어가도록
         # 이 값을 띠 높이에 맞춰 올려야 글자가 그림 위로 안 올라온다.
         "impact_margin_v": 0,
