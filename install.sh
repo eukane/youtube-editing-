@@ -31,8 +31,61 @@ if [ ! -d "$HOME/storage" ]; then
 fi
 
 echo "[2/5] 필요한 프로그램 설치 (몇 분 걸립니다)"
-pkg update -y >/dev/null 2>&1 || true
-pkg install -y python ffmpeg git termux-api >/dev/null
+
+# 설정 파일을 덮어쓸지 되묻지 않게 한다. 물어보면 폰에서는 그대로 멈춰 버린다.
+export DEBIAN_FRONTEND=noninteractive
+APT_OPTS=(-y -o Dpkg::Options::=--force-confnew -o Dpkg::Options::=--force-confdef)
+
+# apt-get 이 없는 환경도 있어서 pkg 로 물러설 수 있게 감싼다.
+apt_do() {
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get "$1" "${APT_OPTS[@]}" "${@:2}"
+    else
+        pkg "$1" -y "${@:2}"
+    fi
+}
+
+apt_do update >/dev/null 2>&1 || true
+
+# 오래 안 쓴 Termux 는 기반 패키지가 낡아서, 새 패키지를 넣으려고 하면
+# dpkg 가 오류로 끝난다. 먼저 밀린 것부터 올려 두면 대부분 해결된다.
+echo "      기본 패키지 정리 중… (처음이면 몇 분 걸립니다)"
+apt_do upgrade >/dev/null 2>&1 || true
+repair_apt() {
+    command -v dpkg >/dev/null 2>&1 && { dpkg --configure -a >/dev/null 2>&1 || true; }
+    command -v apt-get >/dev/null 2>&1 &&
+        { apt-get --fix-broken install "${APT_OPTS[@]}" >/dev/null 2>&1 || true; }
+    return 0
+}
+repair_apt
+
+install_pkg() {
+    local name="$1" optional="${2:-}"
+    if apt_do install "$name" >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "      ↻ $name 다시 시도"
+    repair_apt
+    if apt_do install "$name" >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ -n "$optional" ]; then
+        echo "      ⚠ $name 은(는) 건너뜁니다 (없어도 편집은 됩니다)"
+        return 0
+    fi
+    echo
+    echo "❌ '$name' 설치에 실패했습니다. 아래는 실제 오류 내용입니다."
+    echo "--------------------------------------------------"
+    apt_do install "$name" 2>&1 | tail -25
+    echo "--------------------------------------------------"
+    echo "이 화면을 그대로 캡처해서 물어보시면 원인을 알 수 있습니다."
+    exit 1
+}
+
+install_pkg python
+install_pkg ffmpeg
+install_pkg git
+install_pkg termux-api optional      # 없어도 됨 (알림·배터리 연동용)
 
 echo "[3/5] 한글 폰트"
 FONT_DIR="$HOME/.termux/fonts"
@@ -52,7 +105,18 @@ else
     git clone --depth 1 "${GAMEEDIT_REPO:-https://github.com/eukane/youtube-editing-.git}" "$TARGET"
 fi
 cd "$TARGET"
-pip install -e . >/dev/null
+if ! pip install -e . >/dev/null 2>&1; then
+    echo "      ↻ 다시 시도"
+    python -m ensurepip --upgrade >/dev/null 2>&1 || true
+    if ! pip install -e . >/dev/null 2>&1; then
+        echo
+        echo "❌ 편집기 설치에 실패했습니다. 아래는 실제 오류 내용입니다."
+        echo "--------------------------------------------------"
+        pip install -e . 2>&1 | tail -25
+        echo "--------------------------------------------------"
+        exit 1
+    fi
+fi
 
 echo "[5/5] 실행 명령 등록"
 BIN="$PREFIX/bin/편집기"

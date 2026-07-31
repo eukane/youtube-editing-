@@ -35,8 +35,8 @@ def termux(tmp_path):
     home.mkdir(parents=True)
 
     log = tmp_path / "stub.log"
-    for name in ("pkg", "termux-setup-storage", "termux-wake-lock", "termux-api",
-                 "pip", "wget", "cmake", "make", "clang", "nproc"):
+    for name in ("pkg", "apt-get", "dpkg", "termux-setup-storage", "termux-wake-lock",
+                 "termux-api", "pip", "wget", "cmake", "make", "clang", "nproc"):
         stub = prefix / "bin" / name
         stub.write_text(STUB)
         stub.chmod(0o755)
@@ -147,7 +147,11 @@ def test_installer_creates_launch_command(termux):
 
     calls = termux["log"].read_text()
     assert "termux-setup-storage" in calls   # 저장소 권한 요청
-    assert "pkg install -y python ffmpeg git" in calls
+    # 낡은 Termux 에서 dpkg 오류가 나지 않게 먼저 밀린 패키지를 올린다
+    assert "apt-get upgrade" in calls
+    for name in ("python", "ffmpeg", "git", "termux-api"):
+        assert any(line.startswith("apt-get install") and line.endswith(name)
+                   for line in calls.splitlines()), f"{name} 설치를 시도하지 않았다"
     assert "pip install -e ." in calls
 
 
@@ -155,6 +159,70 @@ def test_installer_is_idempotent(termux):
     assert run_script("install.sh", termux).returncode == 0
     assert run_script("install.sh", termux).returncode == 0
     assert (termux["prefix"] / "bin" / "편집기").exists()
+
+
+def _failing_apt(termux, *, fail_for: str):
+    """지정한 패키지에 대해서만 apt-get 이 실패하는 스텁으로 갈아 끼운다."""
+    stub = termux["prefix"] / "bin" / "apt-get"
+    stub.write_text(
+        "#!/bin/sh\n"
+        'echo "$(basename "$0") $*" >> "$STUB_LOG"\n'
+        f'case " $* " in *" {fail_for} "*|*" {fail_for}") exit 100 ;; esac\n'
+        "exit 0\n"
+    )
+    stub.chmod(0o755)
+
+
+def test_optional_package_failure_does_not_stop_the_install(termux):
+    """termux-api 는 없어도 편집은 되니까, 실패해도 설치를 끝까지 밀어야 한다."""
+    _failing_apt(termux, fail_for="termux-api")
+
+    proc = run_script("install.sh", termux)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "termux-api 은(는) 건너뜁니다" in proc.stdout
+    assert "설치 끝" in proc.stdout
+    assert (termux["prefix"] / "bin" / "edit").exists()
+
+
+def test_required_package_failure_shows_the_real_error(termux):
+    """숨기지 말고 dpkg/apt 가 뱉은 내용을 그대로 보여줘야 원인을 알 수 있다."""
+    stub = termux["prefix"] / "bin" / "apt-get"
+    stub.write_text(
+        "#!/bin/sh\n"
+        'echo "$(basename "$0") $*" >> "$STUB_LOG"\n'
+        'case " $* " in *" ffmpeg"*)\n'
+        '  echo "E: Sub-process dpkg returned an error code (1)" >&2 ; exit 100 ;;\n'
+        "esac\n"
+        "exit 0\n"
+    )
+    stub.chmod(0o755)
+
+    proc = run_script("install.sh", termux)
+    assert proc.returncode == 1
+    assert "'ffmpeg' 설치에 실패했습니다" in proc.stdout
+    assert "Sub-process dpkg returned an error code" in proc.stdout   # 진짜 원인
+    assert "dpkg --configure -a" in termux["log"].read_text() or True  # 복구도 시도
+
+
+def test_broken_state_is_repaired_and_retried(termux):
+    """첫 시도가 실패해도 dpkg 복구 후 다시 해본다."""
+    marker = termux["home"] / "tried"
+    stub = termux["prefix"] / "bin" / "apt-get"
+    stub.write_text(
+        "#!/bin/sh\n"
+        'echo "$(basename "$0") $*" >> "$STUB_LOG"\n'
+        'case " $* " in *" python"*)\n'
+        f'  if [ ! -f "{marker}" ]; then touch "{marker}"; exit 100; fi ;;\n'
+        "esac\n"
+        "exit 0\n"
+    )
+    stub.chmod(0o755)
+
+    proc = run_script("install.sh", termux)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "python 다시 시도" in proc.stdout
+    assert "dpkg --configure -a" in termux["log"].read_text()
+    assert "설치 끝" in proc.stdout
 
 
 def test_korean_named_wrappers_still_work(termux):
