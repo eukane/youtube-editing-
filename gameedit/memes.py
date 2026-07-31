@@ -138,10 +138,42 @@ def _as_list(value) -> list[str]:
     return [str(v) for v in value]
 
 
+# 설정을 건드리지 않아도 파일만 떨어뜨리면 되는 자리.
+# 폰에서는 '내 파일' 앱에서 바로 보이는 곳이라야 쓸 수 있다.
+DEFAULT_ASSET_DIRS = (
+    "~/storage/shared/gameedit-memes",           # 안드로이드: 내 파일 → gameedit-memes
+    "~/storage/shared/Download/gameedit-memes",  # 다운로드 폴더에 만든 경우
+    "~/gameedit/memes",
+    "./memes",
+)
+
+
+def default_asset_dirs() -> list[Path]:
+    """위 후보 중 실제로 존재하는 폴더만."""
+    found: list[Path] = []
+    seen: set[str] = set()
+    for raw in DEFAULT_ASSET_DIRS:
+        path = Path(raw).expanduser()
+        if not path.is_dir():
+            continue
+        key = str(path.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(path)
+    return found
+
+
 def load_packs(names, extra_dirs=None, *, builtin_dir: Path | None = None,
-               asset_dirs=None) -> list[MemeDef]:
+               asset_dirs=None, include_default_dirs: bool = True) -> list[MemeDef]:
     names = _as_list(names)
     extra_dirs = _as_list(extra_dirs)
+    asset_dirs = _as_list(asset_dirs)
+    if include_default_dirs:
+        known = {str(Path(d).expanduser().resolve()) for d in asset_dirs
+                 if Path(d).expanduser().is_dir()}
+        asset_dirs = asset_dirs + [str(d) for d in default_asset_dirs()
+                                   if str(d.resolve()) not in known]
     builtin_dir = Path(builtin_dir or BUILTIN_PACK_DIR)
     memes: list[MemeDef] = []
     seen: set[str] = set()

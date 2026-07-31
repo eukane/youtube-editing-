@@ -155,6 +155,23 @@ def test_installer_creates_launch_command(termux):
     assert "pip install -e ." in calls
 
 
+def test_installer_prepares_a_meme_drop_folder(termux):
+    """설정을 못 만지는 사람도 파일만 넣으면 되도록 폴더가 미리 있어야 한다."""
+    shared = termux["home"] / "storage" / "shared"
+    shared.mkdir(parents=True)
+
+    assert run_script("install.sh", termux).returncode == 0
+
+    drop = shared / "gameedit-memes"
+    assert drop.is_dir(), "밈 폴더가 안 만들어졌다"
+    guide = (drop / "밈-넣는-법.txt").read_text()
+    assert "무야호.png" in guide and "hype.png" in guide
+
+    # gameedit 이 실제로 그 경로를 후보로 들고 있는지
+    from gameedit.memes import DEFAULT_ASSET_DIRS
+    assert any("gameedit-memes" in d for d in DEFAULT_ASSET_DIRS)
+
+
 def test_installer_is_idempotent(termux):
     assert run_script("install.sh", termux).returncode == 0
     assert run_script("install.sh", termux).returncode == 0

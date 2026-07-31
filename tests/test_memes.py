@@ -214,3 +214,42 @@ def test_timeskip_disabled(analysis):
     cfg.set("memes.timeskip_min", 0)
     plan = build_plan(analysis, cfg)
     assert not [c for c in plan.memes if c.trigger == "timeskip"]
+
+
+# --------------------------------------------------- 설정 없이 폴더만으로 등록
+
+def test_default_asset_dirs_are_scanned_without_any_config(tmp_path, monkeypatch):
+    """설정을 못 만지는 사람도 폴더에 파일만 넣으면 밈이 늘어나야 한다."""
+    from gameedit import memes as M
+
+    drop = tmp_path / "storage" / "shared" / "gameedit-memes"
+    drop.mkdir(parents=True)
+    (drop / "무야호.png").write_bytes(b"png")
+    (drop / "무야호.mp3").write_bytes(b"mp3")
+
+    monkeypatch.setattr(M, "DEFAULT_ASSET_DIRS", (str(drop),))
+    loaded = M.load_packs([])                       # packs 도 asset_dirs 도 없이
+
+    hit = [m for m in loaded if "무야호" in m.triggers]
+    assert hit, "폴더에 넣은 파일이 밈으로 안 잡혔다"
+    assert hit[0].asset and hit[0].sfx              # 같은 이름 소리도 짝지어짐
+
+
+def test_default_dirs_do_not_duplicate_explicit_ones(tmp_path, monkeypatch):
+    from gameedit import memes as M
+
+    drop = tmp_path / "memes"
+    drop.mkdir()
+    (drop / "무야호.png").write_bytes(b"png")
+
+    monkeypatch.setattr(M, "DEFAULT_ASSET_DIRS", (str(drop),))
+    loaded = M.load_packs([], asset_dirs=[str(drop)])
+    assert len([m for m in loaded if "무야호" in m.triggers]) == 1
+
+
+def test_missing_default_dirs_are_ignored(monkeypatch):
+    from gameedit import memes as M
+
+    monkeypatch.setattr(M, "DEFAULT_ASSET_DIRS", ("/없는/폴더/입니다",))
+    assert M.default_asset_dirs() == []
+    assert M.load_packs(["default"])                # 기본 팩은 그대로 나온다

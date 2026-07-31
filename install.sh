@@ -118,6 +118,37 @@ if ! pip install -e . >/dev/null 2>&1; then
     fi
 fi
 
+# 설정 파일을 못 만지는 사람도 파일만 넣으면 밈이 늘어나게, 폰 파일 앱에서
+# 바로 보이는 곳에 폴더를 미리 만들어 둔다.
+MEME_DIR="$HOME/storage/shared/gameedit-memes"
+if [ -d "$HOME/storage/shared" ]; then
+    mkdir -p "$MEME_DIR" 2>/dev/null || true
+fi
+[ -d "$MEME_DIR" ] || MEME_DIR="$HOME/gameedit/memes"
+mkdir -p "$MEME_DIR" 2>/dev/null || true
+if [ -d "$MEME_DIR" ] && [ ! -f "$MEME_DIR/밈-넣는-법.txt" ]; then
+    cat > "$MEME_DIR/밈-넣는-법.txt" <<'GUIDE'
+여기에 이미지·움짤·효과음 파일을 넣기만 하면 편집할 때 자동으로 씁니다.
+설정을 고칠 필요 없습니다.
+
+파일 이름이 곧 "언제 뜰지" 입니다.
+
+  무야호.png              → 영상에서 "무야호" 라고 말하면 뜸
+  죽었,사망,뒤졌.png      → 쉼표로 여러 말에 반응
+  hype.png                → 말과 상관없이 제일 신난 순간에 뜸
+  silence.png             → 조용한 구간에 뜸
+  개킹받네@right@2.5.png   → 오른쪽에 2.5초 동안
+
+같은 이름의 소리 파일을 같이 넣으면 그림과 함께 재생됩니다.
+  무야호.png + 무야호.mp3
+
+쓸 수 있는 형식
+  그림 : png jpg jpeg webp bmp
+  움짤 : gif mp4 webm mov mkv
+  소리 : mp3 wav m4a ogg flac aac
+GUIDE
+fi
+
 echo "[5/5] 실행 명령 등록"
 BIN="$PREFIX/bin/편집기"
 cat > "$BIN" <<EOF
