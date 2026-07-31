@@ -24,8 +24,11 @@
 > 을 더블클릭하면 영상 파일을 물어보고 알아서 편집합니다.
 > 준비물 설치부터 차근차근 보려면 → [처음 실행하기](docs/처음-실행하기.md)
 >
-> **📱 폰으로 조작하고 싶다면** → **`모바일로실행.bat`** 더블클릭 후 폰 브라우저로 접속.
-> 앱 설치 없이 아이폰·안드로이드 모두 됩니다 → [폰으로 편집하기](docs/폰으로-편집하기.md)
+> **📱 폰으로 조작** (컴퓨터가 편집, 폰이 리모컨) → **`모바일로실행.bat`** 더블클릭 후
+> 폰 브라우저로 접속. 앱 설치 없이 아이폰·안드로이드 모두 → [폰으로 편집하기](docs/폰으로-편집하기.md)
+>
+> **📱 폰만으로** (컴퓨터 없이 갤럭시 단독) → Termux 로 폰 안에서 통째로 실행
+> → [폰에서만 쓰기](docs/폰에서만-쓰기.md)
 
 ## 설치
 
@@ -112,6 +115,10 @@ out/final.mp4      완성본
 pip install faster-whisper
 gameedit auto 풀영상.mp4 --set transcribe.model=medium
 
+# 1-2) 안드로이드처럼 파이토치를 못 쓰는 환경이면 whisper.cpp
+#      실행 파일과 ggml 모델(.bin)이 있으면 자동으로 잡습니다
+gameedit auto 풀영상.mp4 --set transcribe.backend=whisper.cpp
+
 # 2) 이미 만들어 둔 자막 파일 사용 (유튜브 자동자막 내려받기 등)
 gameedit auto 풀영상.mp4 --subs 대사.srt
 
@@ -175,6 +182,15 @@ memes:
 
 ## 폰으로 쓰기
 
+두 가지 방법이 있습니다.
+
+| | 어디서 편집하나 | 속도 | 준비물 |
+| --- | --- | --- | --- |
+| **컴퓨터 + 폰 리모컨** | 컴퓨터 | 빠름 | 같은 와이파이 |
+| **폰 단독** | 폰 | 느림 | 안드로이드 + Termux |
+
+### 컴퓨터가 편집하고 폰으로 조작
+
 ```bash
 gameedit serve
 ```
@@ -192,6 +208,25 @@ gameedit serve
 
 무거운 계산은 컴퓨터가 하고 폰은 화면만 담당합니다.
 자세한 사용법 → [docs/폰으로-편집하기.md](docs/폰으로-편집하기.md)
+
+### 컴퓨터 없이 폰만으로 (안드로이드)
+
+Termux 앱으로 폰 안에 파이썬·ffmpeg 를 설치해 통째로 돌립니다.
+
+```bash
+# Termux 에서 한 줄
+pkg install -y git && git clone --depth 1 <저장소> ~/gameedit && bash ~/gameedit/termux설치.sh
+
+# 설치 후에는 두 글자
+편집기
+```
+
+크롬으로 `localhost:8000` 을 열면 같은 화면이 뜹니다.
+폰에서는 `--profile phone` 이 자동 적용돼 **장면 검출을 건너뛰고**, 720p 이하로,
+빠른 인코딩 설정으로 돕니다. 자막은 whisper.cpp 로 만듭니다
+(`bash ~/gameedit/termux자막설치.sh`).
+
+자세한 사용법 → [docs/폰에서만-쓰기.md](docs/폰에서만-쓰기.md)
 
 ## 하이라이트는 어떻게 고르나
 
@@ -236,7 +271,8 @@ gameedit init        # gameedit.yaml 생성 (모든 기본값이 들어 있습�
 | `highlight.target_duration` | 480 | 목표 길이(초). `-t 8m` 과 같음 |
 | `highlight.min_clip` / `max_clip` | 6 / 45 | 클립 한 개의 최소·최대 길이 |
 | `highlight.keywords` | 40여 개 | 하이라이트 판정에 쓰는 대사 키워드 |
-| `subtitles.font` / `font_size` | Noto Sans CJK KR / 62 | 자막 폰트 (1080p 기준 크기) |
+| `project.max_resolution` | (없음) | 이보다 크면 줄인다 (작은 영상은 그대로) |
+| `subtitles.font` / `font_size` | Noto Sans KR / 62 | 자막 폰트 (1080p 기준 크기) |
 | `subtitles.max_chars_per_line` | 18 | 한 줄 글자 수 |
 | `subtitles.emphasis_threshold` | 0.72 | 이 이상 흥분한 구간의 대사는 강조 |
 | `memes.max_per_minute` | 4 | 분당 밈 개수 상한 |
@@ -246,6 +282,15 @@ gameedit init        # gameedit.yaml 생성 (모든 기본값이 들어 있습�
 | `render.punch_zoom` | true | 피크 구간 줌 인 |
 | `render.crf` / `preset` | 20 / medium | 화질·인코딩 속도 |
 | `project.resolution` | (원본 유지) | 예: `1920x1080`, 쇼츠면 `1080x1920` |
+
+### 프로필
+
+여러 값을 한 번에 바꾸는 묶음 설정입니다. `기본값 < 프로필 < 내 설정` 순으로 적용됩니다.
+
+```bash
+gameedit auto 영상.mp4 --profile phone     # 폰에서 돌릴 때 (빠르게, 장면검출 생략, 720p)
+gameedit auto 영상.mp4 --profile quality   # 화질 우선 (느림)
+```
 
 명령줄에서 임시로 바꾸려면 `--set` 을 씁니다.
 

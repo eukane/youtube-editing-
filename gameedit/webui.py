@@ -128,11 +128,11 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
         <div class="muted" id="uptext">올리는 중…</div>
       </div>
       <div class="muted" style="margin-top:12px">
-        큰 영상은 와이파이로 올리세요. 컴퓨터에 이미 있는 영상은 아래에서 고르면 올릴 필요가 없습니다.
+        {{DEVICE}}에 이미 있는 영상은 아래 목록에서 고르세요. 올릴 필요가 없어 훨씬 빠릅니다.
       </div>
     </div>
 
-    <h2>컴퓨터에 있는 영상</h2>
+    <h2>{{DEVICE}}에 있는 영상</h2>
     <div class="card" id="files"><div class="empty">불러오는 중…</div></div>
 
     <h2>작업 목록</h2>
@@ -284,7 +284,7 @@ async function refresh(){
         <div class="grow"><div class="label">🎬 ${esc(f.name)}</div>
         <div class="sub">${f.size_mb} MB</div></div><div class="muted">›</div>
       </div>`).join('') :
-      '<div class="empty">컴퓨터의 uploads 폴더에 영상을 넣어두면<br>여기에 나타납니다</div>';
+      '<div class="empty">{{DEVICE}}에 저장된 영상이 여기에 나타납니다</div>';
 
     const {jobs} = await api('/api/jobs');
     $('jobs').innerHTML = jobs.length ? jobs.map(j => `

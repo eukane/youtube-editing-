@@ -253,6 +253,18 @@ def resolve_output_size(plan: EditPlan, project_cfg: dict) -> tuple[int, int, fl
             width, height = int(w), int(h)
         except ValueError:
             pass
+    # 상한만 지정하면 큰 영상은 줄이고 작은 영상은 그대로 둔다.
+    # (폰에서 480p 영상을 굳이 720p 로 늘려 인코딩할 이유가 없다)
+    cap = (project_cfg.get("max_resolution") or "").lower().replace(" ", "")
+    if "x" in cap and not ("x" in resolution):
+        try:
+            cw, ch = (int(v) for v in cap.split("x"))
+            if width * height > cw * ch:
+                ratio = min(cw / width, ch / height)
+                width, height = int(width * ratio), int(height * ratio)
+        except ValueError:
+            pass
+
     width = max(2, width - (width % 2))
     height = max(2, height - (height % 2))
     fps = float(project_cfg.get("fps") or 0) or float(plan.media.fps or 0)
@@ -286,16 +298,33 @@ def render(plan: EditPlan, config, ass_path: Path | None, output: Path, work_dir
             log(" ".join(cmd))
         return job
 
+    codec = config.get("render.video_codec", "libx264")
+
+    def run_stage(cmd: list[str]) -> None:
+        """실패하면 소프트웨어 인코더로 한 번 더 시도.
+
+        폰의 하드웨어 인코더(h264_mediacodec 등)는 기기마다 되고 안 되고가 달라서
+        한 번에 판단할 수 없다. 안 되면 조용히 libx264 로 돌아간다.
+        """
+        try:
+            run(cmd, capture=True)
+        except FFmpegError:
+            if codec == "libx264":
+                raise
+            log(f"    · {codec} 인코더가 실패해서 libx264 로 다시 시도합니다")
+            fallback = [("libx264" if arg == codec else arg) for arg in cmd]
+            run(fallback, capture=True)
+
     if skip_cut and job.intermediate and job.intermediate.exists():
         log(f"1/2 컷 편집 건너뜀 (기존 {job.intermediate.name} 사용)")
     else:
         progress("컷 편집", 0.0)
         log(f"1/2 하이라이트 {len(plan.clips)}개 컷 편집 중… → {job.intermediate}")
-        run(job.cut_cmd, capture=True)
+        run_stage(job.cut_cmd)
 
     progress("밈·자막 합성", 0.55)
     log(f"2/2 밈·자막 합성 중… → {output}")
-    run(job.dress_cmd, capture=True)
+    run_stage(job.dress_cmd)
 
     progress("완료", 1.0)
     if not config.get("render.keep_intermediate", False) and job.intermediate:

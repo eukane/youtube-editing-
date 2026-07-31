@@ -23,6 +23,7 @@ DEFAULTS: dict[str, Any] = {
         "output": "out/final.mp4",
         "work_dir": "work",
         "resolution": "",  # 비우면 원본 해상도 유지
+        "max_resolution": "",  # 이보다 크면 줄인다 (작은 영상을 늘리지는 않음)
         "fps": 0,  # 0이면 원본 fps 유지
     },
     "analyze": {
@@ -40,6 +41,9 @@ DEFAULTS: dict[str, Any] = {
         "device": "auto",
         "compute_type": "int8",
         "external": "",  # 외부 자막 파일(.srt/.vtt) 경로
+        "whisper_cpp_bin": "",  # whisper.cpp 실행 파일 (비우면 자동 탐색)
+        "whisper_cpp_model": "",  # ggml 모델 .bin 경로 (비우면 자동 탐색)
+        "threads": 0,  # whisper.cpp 스레드 수 (0=자동)
         "initial_prompt": "게임 실황 방송 중계. 리액션과 감탄사가 많음.",
     },
     "highlight": {
@@ -127,6 +131,39 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+# 실행 환경에 따라 한 번에 바꾸는 묶음 설정
+PROFILES: dict[str, dict] = {
+    # 폰에서 직접 돌릴 때. 화질을 조금 포기하고 시간을 크게 줄인다.
+    "phone": {
+        "project": {"max_resolution": "1280x720"},
+        "analyze": {
+            # 장면 검출은 영상 전체를 디코딩해야 해서 폰에서는 가장 비싸다.
+            # 하이라이트는 소리와 대사만으로도 충분히 잡힌다.
+            "scene_threshold": 0,
+            "scene_scale_width": 160,
+            "hop": 0.1,
+        },
+        "transcribe": {"model": "tiny", "compute_type": "int8"},
+        "render": {"preset": "veryfast", "crf": 26, "audio_bitrate": "128k"},
+        "highlight": {"max_clips": 25},
+    },
+    # 화질 우선 (시간이 오래 걸려도 됨)
+    "quality": {
+        "analyze": {"scene_scale_width": 480},
+        "transcribe": {"model": "medium"},
+        "render": {"preset": "slow", "crf": 18},
+    },
+}
+
+
+def apply_profile(data: dict, name: str) -> dict:
+    """프로필을 기본값 위에, 사용자 설정 아래에 끼워 넣는다."""
+    profile = PROFILES.get(name)
+    if profile is None:
+        raise ValueError(f"모르는 프로필입니다: {name} (쓸 수 있는 것: {', '.join(PROFILES)})")
+    return deep_merge(profile, data)
+
+
 def deep_merge(base: dict, override: dict) -> dict:
     out = copy.deepcopy(base)
     for key, value in (override or {}).items():
@@ -140,9 +177,21 @@ def deep_merge(base: dict, override: dict) -> dict:
 class Config:
     """점 표기법으로 읽는 얇은 설정 래퍼."""
 
-    def __init__(self, data: dict | None = None, path: Path | None = None):
-        self.data = deep_merge(DEFAULTS, data or {})
+    def __init__(self, data: dict | None = None, path: Path | None = None,
+                 profile: str = ""):
+        # 사용자가 실제로 적어 준 값만 따로 보관한다. 프로필은 기본값 위·사용자 값 아래에
+        # 끼워 넣어야 하는데, 한 번 병합하고 나면 둘을 구분할 수 없기 때문이다.
+        self.raw = copy.deepcopy(data or {})
+        merged = apply_profile(self.raw, profile) if profile else self.raw
+        self.data = deep_merge(DEFAULTS, merged)
         self.path = Path(path) if path else None
+        self.profile = profile
+
+    def with_profile(self, profile: str) -> "Config":
+        """사용자 설정은 그대로 두고 프로필만 덧입힌 새 설정."""
+        if not profile:
+            return self
+        return Config(self.raw, path=self.path, profile=profile)
 
     # -- 접근 --------------------------------------------------------------
     def get(self, dotted: str, default: Any = None) -> Any:

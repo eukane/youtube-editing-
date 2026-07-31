@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import __version__
 from .analyze import analyze_video
-from .config import Config
+from .config import PROFILES, Config
 from .fonts import installed_korean_fonts, resolve_font
 from .media import FFmpegError, find_binary, format_timecode
 from .memes import (AUDIO_EXTS, BUILTIN_PACK_DIR, IMAGE_EXTS, VIDEO_EXTS, load_packs,
@@ -59,6 +59,9 @@ def load_config(args) -> Config:
         config = Config.load(args.config)
     else:
         config = Config.discover(Path.cwd())
+    profile = getattr(args, "profile", "")
+    if profile:
+        config = config.with_profile(profile)
     for override in getattr(args, "set", None) or []:
         if "=" not in override:
             raise SystemExit(f"--set 형식이 잘못됐습니다 (key=value): {override}")
@@ -177,15 +180,24 @@ def cmd_doctor(args) -> int:
     if not ffmpeg:
         ok = False
 
-    from .transcribe import _module_available, resolve_backend
-
-    backend = resolve_backend("auto")
-    log(f"음성인식 : {backend}"
-        + ("" if backend != "none" else "  → `pip install faster-whisper` 또는 --subs 로 자막 파일 지정"))
-    log(f"  faster-whisper: {'설치됨' if _module_available('faster_whisper') else '없음'}")
-    log(f"  openai-whisper: {'설치됨' if _module_available('whisper') else '없음'}")
+    from .transcribe import (_module_available, find_whisper_cpp, find_whisper_model,
+                             resolve_backend)
 
     config = load_config(args)
+    tcfg = config.section("transcribe")
+    backend = resolve_backend("auto", tcfg.get("external", ""), tcfg)
+    hint = ""
+    if backend == "none":
+        hint = ("  → PC: `pip install faster-whisper` / "
+                "폰(Termux): `bash termux자막설치.sh` / 또는 --subs 로 자막 파일 지정")
+    log(f"음성인식 : {backend}{hint}")
+    log(f"  faster-whisper: {'설치됨' if _module_available('faster_whisper') else '없음'}")
+    log(f"  openai-whisper: {'설치됨' if _module_available('whisper') else '없음'}")
+    cpp_bin = find_whisper_cpp(tcfg.get("whisper_cpp_bin", ""))
+    cpp_model = find_whisper_model(tcfg.get("whisper_cpp_model", ""), tcfg.get("model", ""))
+    log(f"  whisper.cpp   : {cpp_bin or '없음'}"
+        + (f" · 모델 {Path(cpp_model).name}" if cpp_model else " · 모델 없음"))
+
     font = config.get("subtitles.font", "Noto Sans CJK KR")
     installed = list(installed_korean_fonts())
     if installed:
@@ -316,9 +328,15 @@ def cmd_serve(args) -> int:
     from .server import serve
 
     config = load_config(args)
-    serve(config, host=args.host, port=args.port,
+    host = args.host
+    access_key = "" if args.no_key else args.key
+    if args.local:
+        # 폰 안에서 서버와 브라우저가 같이 돌아가는 경우
+        host = "127.0.0.1"
+        access_key = ""
+    serve(config, host=host, port=args.port,
           root=Path(args.work) if args.work else None,
-          access_key="" if args.no_key else args.key,
+          access_key=access_key,
           watch_dirs=args.watch or [], log=log)
     return 0
 
@@ -424,6 +442,8 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-w", "--work", help="작업 폴더 경로")
     parser.add_argument("--set", action="append", metavar="KEY=VALUE",
                         help="설정 개별 덮어쓰기 (예: --set highlight.target_duration=600)")
+    parser.add_argument("--profile", choices=sorted(PROFILES), default="",
+                        help="phone=폰에서 돌릴 때(빠르게) / quality=화질 우선")
 
 
 def _add_edit_options(parser: argparse.ArgumentParser) -> None:
@@ -495,6 +515,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-key", action="store_true", help="접속 번호 없이 열기 (집 네트워크 전용)")
     p.add_argument("--watch", action="append", metavar="폴더",
                    help="폰에서 고를 수 있게 보여줄 영상 폴더 (여러 번 지정 가능)")
+    p.add_argument("--local", action="store_true",
+                   help="폰 안에서 단독 실행 (127.0.0.1 로만 열고 접속 번호 없음)")
     _add_common(p)
     p.set_defaults(func=cmd_serve)
 

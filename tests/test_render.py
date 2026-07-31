@@ -121,3 +121,22 @@ def test_resolve_output_size(plan):
     # 홀수 해상도는 짝수로 보정 (libx264 요구사항)
     plan.media.width, plan.media.height = 1921, 1081
     assert resolve_output_size(plan, {}) == (1920, 1080, 30.0)
+
+
+def test_max_resolution_only_shrinks(plan):
+    """상한은 큰 영상만 줄이고 작은 영상은 건드리지 않는다."""
+    plan.media.width, plan.media.height = 3840, 2160
+    assert resolve_output_size(plan, {"max_resolution": "1280x720"})[:2] == (1280, 720)
+
+    plan.media.width, plan.media.height = 640, 360
+    assert resolve_output_size(plan, {"max_resolution": "1280x720"})[:2] == (640, 360)
+
+    # 세로 영상도 비율을 지킨다
+    plan.media.width, plan.media.height = 1080, 1920
+    w, h = resolve_output_size(plan, {"max_resolution": "1280x720"})[:2]
+    assert (w, h) == (404, 720)
+
+    # 정확한 해상도를 지정하면 그쪽이 우선
+    plan.media.width, plan.media.height = 3840, 2160
+    assert resolve_output_size(plan, {"resolution": "1920x1080",
+                                      "max_resolution": "640x360"})[:2] == (1920, 1080)

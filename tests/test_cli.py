@@ -169,3 +169,46 @@ def test_add_meme_rejects_unknown_format(tmp_path, capsys):
     source.write_text("x", encoding="utf-8")
     with pytest.raises(SystemExit):
         main(["add-meme", str(source), "--pack", str(pack_dir)])
+
+
+# ------------------------------------------------------------------ 프로필
+
+def test_profile_sits_between_defaults_and_user_settings():
+    """기본값 < 프로필 < 사용자 설정 순으로 이겨야 한다."""
+    plain = Config()
+    assert plain.get("render.preset") == "medium"          # 기본값
+
+    phone = Config(profile="phone")
+    assert phone.get("render.preset") == "veryfast"        # 프로필이 기본값을 이긴다
+    assert phone.get("analyze.hop") == 0.1
+    assert phone.get("analyze.scene_threshold") == 0       # 폰에서는 장면 검출 생략
+
+    mine = Config({"render": {"preset": "slow"}}, profile="phone")
+    assert mine.get("render.preset") == "slow"             # 사용자 설정이 프로필을 이긴다
+    assert mine.get("render.crf") == 26                    # 나머지는 프로필 값 유지
+
+
+def test_with_profile_applies_to_already_loaded_config(tmp_path):
+    """설정 파일을 읽은 뒤에 프로필을 씌워도 프로필이 먹어야 한다."""
+    (tmp_path / "gameedit.yaml").write_text("highlight:\n  target_duration: 300\n",
+                                            encoding="utf-8")
+    config = Config.discover(tmp_path).with_profile("phone")
+    assert config.get("analyze.hop") == 0.1                # 프로필 반영
+    assert config.get("highlight.target_duration") == 300  # 사용자 설정 유지
+
+
+def test_cli_set_beats_profile():
+    from gameedit.cli import load_config
+
+    args = build_parser().parse_args(
+        ["plan", "--profile", "phone", "--set", "render.crf=18"])
+    config = load_config(args)
+    assert config.get("render.crf") == 18
+    assert config.get("render.preset") == "veryfast"
+
+
+def test_unknown_profile_is_rejected():
+    from gameedit.config import apply_profile
+
+    with pytest.raises(ValueError, match="모르는 프로필"):
+        apply_profile({}, "없는프로필")

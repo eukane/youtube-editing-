@@ -57,10 +57,16 @@ def analyze_video(src: str | Path, config: Config, work_dir: Path, *,
         log("[2/4] 오디오 트랙이 없어 오디오 분석을 건너뜁니다.")
 
     progress("장면 전환 검출", 0.35)
-    log("[3/4] 장면 전환 검출…")
-    scenes = detect_scenes(src, threshold=float(acfg.get("scene_threshold", 0.35)),
-                           scale_width=int(acfg.get("scene_scale_width", 320)))
-    log(f"      컷 {len(scenes)}개")
+    scene_threshold = float(acfg.get("scene_threshold", 0.35))
+    if scene_threshold <= 0:
+        # 영상 전체를 디코딩해야 하는 단계라 폰처럼 느린 기기에서는 끄는 편이 낫다
+        log("[3/4] 장면 전환 검출 건너뜀 (analyze.scene_threshold=0)")
+        scenes = []
+    else:
+        log("[3/4] 장면 전환 검출…")
+        scenes = detect_scenes(src, threshold=scene_threshold,
+                               scale_width=int(acfg.get("scene_scale_width", 320)))
+        log(f"      컷 {len(scenes)}개")
 
     transcript = None
     if skip_transcribe:

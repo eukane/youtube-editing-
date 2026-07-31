@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import re
 import secrets
 import shutil
@@ -35,6 +36,30 @@ from .webui import PAGE
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".ts", ".flv"}
 UPLOAD_CHUNK = 1024 * 1024
+
+
+def on_termux() -> bool:
+    """안드로이드 Termux 안에서 돌고 있는지."""
+    return "com.termux" in (os.environ.get("PREFIX", "") or "") or \
+        Path("/data/data/com.termux/files/usr").exists()
+
+
+def phone_media_dirs() -> list[Path]:
+    """Termux 에서 접근할 수 있는 폰 안의 영상 폴더들.
+
+    `termux-setup-storage` 를 한 번 실행하면 ~/storage 에 연결된다.
+    """
+    home = Path.home()
+    candidates = [
+        home / "storage" / "shared" / "DCIM",
+        home / "storage" / "shared" / "Movies",
+        home / "storage" / "shared" / "Download",
+        home / "storage" / "dcim",
+        home / "storage" / "movies",
+        home / "storage" / "downloads",
+        home / "storage" / "shared" / "Android" / "media",
+    ]
+    return [p for p in candidates if p.is_dir()]
 
 
 # --------------------------------------------------------------------------
@@ -345,6 +370,7 @@ class Handler(BaseHTTPRequestHandler):
     manager: JobManager
     access_key: str
     watch_dirs: list[Path]
+    device_label: str = "컴퓨터"
 
     # -- 유틸 --------------------------------------------------------------
     def log_message(self, fmt: str, *args) -> None:  # 콘솔을 조용하게
@@ -454,7 +480,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/":
-            self._send_text(PAGE)
+            self._send_text(PAGE.replace("{{DEVICE}}", self.device_label))
             return
         if path == "/api/jobs":
             self._send_json({"jobs": self.manager.listing()})
@@ -532,7 +558,8 @@ class Handler(BaseHTTPRequestHandler):
     def _available_files(self) -> list[dict]:
         seen: set[str] = set()
         files: list[dict] = []
-        for directory in [self.manager.root / "uploads", *self.watch_dirs]:
+        directories = [self.manager.root / "uploads", *self.watch_dirs]
+        for directory in directories:
             if not directory.is_dir():
                 continue
             for entry in sorted(directory.iterdir()):
@@ -649,10 +676,15 @@ def create_server(config: Config, *, host: str = "0.0.0.0", port: int = 8000,
     manager.restore()
     key = "" if access_key == "" else (access_key or f"{secrets.randbelow(9000) + 1000}")
 
+    watch = [Path(d) for d in (watch_dirs or [])]
+    if on_termux():
+        watch.extend(d for d in phone_media_dirs() if d not in watch)
+
     handler = type("BoundHandler", (Handler,), {
         "manager": manager,
         "access_key": key,
-        "watch_dirs": [Path(d) for d in (watch_dirs or [])],
+        "watch_dirs": watch,
+        "device_label": "폰" if on_termux() else "컴퓨터",
     })
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
@@ -665,16 +697,25 @@ def serve(config: Config, *, host: str = "0.0.0.0", port: int = 8000,
     httpd, _manager, key = create_server(config, host=host, port=port, root=root,
                                          access_key=access_key, watch_dirs=watch_dirs)
     suffix = f"?k={key}" if key else ""
-    address = f"http://{local_ip()}:{port}/{suffix}"
+    local_only = host in ("127.0.0.1", "localhost")
+    address = f"http://{'localhost' if local_only else local_ip()}:{port}/{suffix}"
 
     log("")
     log("=" * 52)
-    log("  📱 폰에서 아래 주소로 접속하세요")
-    log("")
-    log(f"      {address}")
-    log("")
-    log("  · 폰과 이 컴퓨터가 같은 와이파이에 있어야 합니다")
-    log("  · 편집이 끝날 때까지 이 창을 켜 두세요")
+    if local_only:
+        log("  📱 준비됐습니다. 크롬을 열고 아래 주소로 들어가세요")
+        log("")
+        log(f"      {address}")
+        log("")
+        log("  · 이 앱(Termux)을 끄면 편집도 멈춥니다. 켜 둔 채로 두세요")
+        log("  · 홈 버튼으로 나가는 건 괜찮습니다")
+    else:
+        log("  📱 폰에서 아래 주소로 접속하세요")
+        log("")
+        log(f"      {address}")
+        log("")
+        log("  · 폰과 이 컴퓨터가 같은 와이파이에 있어야 합니다")
+        log("  · 편집이 끝날 때까지 이 창을 켜 두세요")
     log("  · 끄려면 Ctrl+C")
     log("=" * 52)
     log("")
@@ -713,4 +754,5 @@ def disk_free_mb(path: Path) -> float:
 
 
 __all__ = ["serve", "create_server", "JobManager", "Job", "plan_for_phone", "content_disposition",
+           "on_termux", "phone_media_dirs",
            "apply_phone_edits", "local_ip", "cleanup_old_uploads", "disk_free_mb"]
