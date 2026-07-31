@@ -52,14 +52,34 @@ def ffprobe_bin() -> str | None:
     return find_binary("ffprobe")
 
 
+def _lower_priority(amount: int):
+    """자식 프로세스만 우선순위를 낮추는 훅.
+
+    인코딩은 CPU 를 100% 쓴다. 그대로 두면 같은 기기에서 브라우저를 조작할
+    수 없다(폰·태블릿에서 특히 심하다). 우선순위를 낮추면 총 시간은 거의
+    그대로면서 화면은 계속 반응한다.
+    """
+    if amount <= 0 or not hasattr(os, "nice"):
+        return None
+
+    def hook() -> None:
+        try:
+            os.nice(amount)
+        except OSError:
+            pass
+
+    return hook
+
+
 def run(cmd: Sequence[str], *, capture: bool = True, check: bool = True,
-        stderr_tail: int = 40) -> subprocess.CompletedProcess:
+        stderr_tail: int = 40, nice: int = 0) -> subprocess.CompletedProcess:
     proc = subprocess.run(
         list(cmd),
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.PIPE if capture else None,
         text=True,
         errors="replace",
+        preexec_fn=_lower_priority(nice),
     )
     if check and proc.returncode != 0:
         tail = ""

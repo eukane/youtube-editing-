@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import Callable
 
@@ -71,6 +72,22 @@ class RenderJob:
 # --------------------------------------------------------------------------
 # 1단계: 컷 편집
 # --------------------------------------------------------------------------
+
+
+def resolve_threads(cfg: dict) -> int:
+    """ffmpeg 에 넘길 스레드 수.
+
+        0 이상  그대로 (0 이면 ffmpeg 가 알아서 = 코어 전부)
+        음수    그만큼 코어를 남겨 둔다
+
+    코어를 전부 쓰면 같은 기기에서 브라우저 조작이 불가능해진다. 폰·태블릿
+    에서 편집기를 돌리면서 화면도 봐야 하므로 여유를 남기는 쪽이 낫다.
+    """
+    raw = int(cfg.get("threads", 0) or 0)
+    if raw >= 0:
+        return raw
+    cores = os.cpu_count() or 2
+    return max(1, cores + raw)
 
 
 def build_cut_filter(plan: EditPlan, cfg: dict, *, width: int, height: int,
@@ -149,8 +166,9 @@ def build_cut_command(plan: EditPlan, cfg: dict, output: Path, *, width: int, he
         "-b:a", cfg.get("audio_bitrate", "192k"),
         "-ar", "48000",
     ]
-    if int(cfg.get("threads", 0) or 0):
-        cmd += ["-threads", str(int(cfg["threads"]))]
+    threads = resolve_threads(cfg)
+    if threads:
+        cmd += ["-threads", str(threads)]
     cmd.append(str(output))
     return cmd
 
@@ -273,8 +291,9 @@ def build_dress_command(plan: EditPlan, cfg: dict, source: Path, ass_path: Path 
         "-ar", "48000",
         "-movflags", "+faststart",
     ]
-    if int(cfg.get("threads", 0) or 0):
-        cmd += ["-threads", str(int(cfg["threads"]))]
+    threads = resolve_threads(cfg)
+    if threads:
+        cmd += ["-threads", str(threads)]
     cmd.append(str(output))
     return cmd
 
@@ -339,6 +358,7 @@ def render(plan: EditPlan, config, ass_path: Path | None, output: Path, work_dir
         return job
 
     codec = config.get("render.video_codec", "libx264")
+    nice = int(config.get("render.nice", 0) or 0)
 
     def run_stage(cmd: list[str]) -> None:
         """실패하면 소프트웨어 인코더로 한 번 더 시도.
@@ -347,13 +367,13 @@ def render(plan: EditPlan, config, ass_path: Path | None, output: Path, work_dir
         한 번에 판단할 수 없다. 안 되면 조용히 libx264 로 돌아간다.
         """
         try:
-            run(cmd, capture=True)
+            run(cmd, capture=True, nice=nice)
         except FFmpegError:
             if codec == "libx264":
                 raise
             log(f"    · {codec} 인코더가 실패해서 libx264 로 다시 시도합니다")
             fallback = [("libx264" if arg == codec else arg) for arg in cmd]
-            run(fallback, capture=True)
+            run(fallback, capture=True, nice=nice)
 
     if skip_cut and job.intermediate and job.intermediate.exists():
         log(f"1/2 컷 편집 건너뜀 (기존 {job.intermediate.name} 사용)")

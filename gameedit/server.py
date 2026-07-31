@@ -879,6 +879,11 @@ def serve(config: Config, *, host: str = "0.0.0.0", port: int = 8000,
         log("")
         log("  · 이 앱(Termux)을 끄면 편집도 멈춥니다. 켜 둔 채로 두세요")
         log("  · 홈 버튼으로 나가는 건 괜찮습니다")
+        if on_termux():
+            log("")
+            log("  ⚠ 편집 도중 Termux 가 저절로 꺼진 적이 있다면 딱 한 번만:")
+            log("     설정 → 애플리케이션 → Termux → 배터리 → '제한 없음'")
+            log("     (안드로이드가 백그라운드 앱을 정리해서 생기는 일입니다)")
     else:
         log("  📱 폰에서 아래 주소로 접속하세요")
         log("")

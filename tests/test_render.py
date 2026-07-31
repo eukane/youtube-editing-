@@ -217,3 +217,62 @@ def test_missing_watermark_file_is_ignored(tmp_path):
     cmd = build_dress_command(plan, cfg, tmp_path / "cut.mp4", None,
                               tmp_path / "out.mp4", width=1280, height=720)
     assert "없는" not in " ".join(cmd)
+
+
+# --------------------------------- 폰에서 화면이 멈추지 않게 (CPU 양보)
+
+def test_phone_profile_leaves_cpu_for_the_screen():
+    """코어를 전부 먹으면 같은 기기에서 브라우저를 조작할 수 없다."""
+    import os
+
+    from gameedit.config import Config
+    from gameedit.render import resolve_threads
+
+    phone = Config(profile="phone").section("render")
+    used = resolve_threads(phone)
+    cores = os.cpu_count() or 2
+
+    assert 1 <= used < cores or cores <= 2, f"코어 {cores}개 중 {used}개를 쓴다"
+    assert phone["nice"] > 0, "우선순위를 안 낮추면 화면이 멈춘다"
+
+
+def test_thread_resolution_rules():
+    from gameedit.render import resolve_threads
+
+    assert resolve_threads({"threads": 0}) == 0        # ffmpeg 자동
+    assert resolve_threads({"threads": 3}) == 3        # 그대로
+    assert resolve_threads({"threads": -1}) >= 1       # 한 코어 남김
+    assert resolve_threads({"threads": -999}) == 1     # 0 이하로는 안 내려간다
+
+
+def test_threads_reach_the_ffmpeg_command(tmp_path):
+    from gameedit.config import Config
+    from gameedit.models import Clip, EditPlan, MediaInfo
+    from gameedit.render import build_cut_command
+
+    plan = EditPlan(source="/tmp/a.mp4",
+                    media=MediaInfo(path="/tmp/a.mp4", duration=30.0, width=1280, height=720))
+    plan.clips = [Clip(source_start=0.0, source_end=5.0)]
+    plan.relayout()
+
+    cfg = dict(Config().section("render"), threads=2)
+    cmd = build_cut_command(plan, cfg, tmp_path / "o.mp4", width=1280, height=720, fps=30.0)
+    assert "-threads" in cmd and cmd[cmd.index("-threads") + 1] == "2"
+
+
+def test_nice_hook_lowers_priority_only_when_asked():
+    from gameedit.media import _lower_priority
+
+    assert _lower_priority(0) is None
+    hook = _lower_priority(10)
+    assert callable(hook)
+
+
+def test_termux_gets_the_battery_warning():
+    """안드로이드가 앱을 죽이는 건 코드로 못 막는다. 무엇을 바꿔야 하는지 알려준다."""
+    import inspect
+
+    from gameedit import server
+
+    source = inspect.getsource(server.serve)
+    assert "배터리" in source and "제한 없음" in source

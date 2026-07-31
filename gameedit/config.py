@@ -200,7 +200,12 @@ DEFAULTS: dict[str, Any] = {
         "watermark": "",            # 우하단에 상시 노출할 로고 이미지 경로
         "watermark_scale": 0.07,    # 화면 너비 대비 크기
         "watermark_opacity": 0.85,
+        # 0=코어 전부, 음수=그만큼 남겨 둔다. 전부 쓰면 같은 기기에서
+        # 브라우저 조작이 안 된다.
         "threads": 0,
+        # 인코딩 프로세스의 우선순위를 낮춘다 (0~19, 클수록 양보).
+        # 총 시간은 거의 그대로면서 화면은 계속 반응한다.
+        "nice": 0,
         "keep_intermediate": False,
     },
 }
@@ -219,7 +224,14 @@ PROFILES: dict[str, dict] = {
             "hop": 0.1,
         },
         "transcribe": {"model": "tiny", "compute_type": "int8"},
-        "render": {"preset": "veryfast", "crf": 26, "audio_bitrate": "128k"},
+        "render": {
+            "preset": "veryfast", "crf": 26, "audio_bitrate": "128k",
+            # 폰·태블릿에서는 편집기와 브라우저가 같은 기기에 있다. 코어를
+            # 전부 먹으면 화면이 멈춘 것처럼 되고, 안드로이드가 앱을 죽이기도
+            # 한다. 두 코어를 남기고 우선순위도 낮춘다.
+            "threads": -2,
+            "nice": 10,
+        },
         "highlight": {"max_clips": 25},
     },
     # 화질 우선 (시간이 오래 걸려도 됨)
