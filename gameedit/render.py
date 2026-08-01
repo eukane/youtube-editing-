@@ -493,6 +493,39 @@ def resolve_batch(render_cfg: dict, src_width: int = 0, src_height: int = 0, *,
     return batch
 
 
+def part_path(piece: Path) -> Path:
+    """만드는 중인 조각. 다 되면 원래 이름으로 바꾼다."""
+    return piece.with_name(f"{piece.stem}.part{piece.suffix}")
+
+
+def segment_fingerprint(cmds: list[list[str]]) -> str:
+    """이 조각들이 '같은 편집'인지 알아보는 지문.
+
+    설정을 바꿔서 다시 만들 때 예전 조각이 남아 있으면, 이어하기가 옛날
+    영상과 새 영상을 섞어 붙인다. 명령이 하나라도 다르면 전부 버린다.
+    """
+    import hashlib
+
+    text = "\n".join(" ".join(cmd) for cmd in cmds)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def reusable_segments(job: RenderJob, seg_dir: Path) -> int:
+    """이어서 쓸 수 있는 조각이 몇 개인지. 지문이 다르면 싹 지우고 0."""
+    stamp = seg_dir / "fingerprint.txt"
+    want = segment_fingerprint(job.segment_cmds)
+    have = stamp.read_text(encoding="utf-8").strip() if stamp.is_file() else ""
+    if have != want:
+        for old in seg_dir.glob("*.mp4"):
+            old.unlink(missing_ok=True)
+        stamp.write_text(want, encoding="utf-8")
+        return 0
+    # 반쯤 쓰다 만 조각은 지운다 (이름이 바뀌기 전에 죽은 것)
+    for partial in seg_dir.glob("*.part.mp4"):
+        partial.unlink(missing_ok=True)
+    return sum(1 for piece in job.segment_files if piece.is_file())
+
+
 def build_render_job(plan: EditPlan, config, ass_path: Path | None, output: Path,
                      work_dir: Path) -> RenderJob:
     render_cfg = config.section("render")
@@ -512,8 +545,12 @@ def build_render_job(plan: EditPlan, config, ass_path: Path | None, output: Path
         for i, group in enumerate(_batched(plan.clips, batch)):
             piece = seg_dir / f"{i:04d}.mp4"
             job.segment_files.append(piece)
+            # 만드는 동안에는 `.part.mp4` 로 쓰고 다 되면 이름을 바꾼다.
+            # 도중에 앱이 죽으면 반쯤 쓰다 만 파일이 남는데, 그걸 완성된
+            # 조각으로 착각하면 영상이 중간에 끊긴 채로 이어 붙는다.
             job.segment_cmds.append(build_batch_command(
-                plan, group, render_cfg, piece, width=width, height=height, fps=fps))
+                plan, group, render_cfg, part_path(piece),
+                width=width, height=height, fps=fps))
         job.concat_cmd = build_concat_command(seg_dir / "list.txt", intermediate)
     else:
         job.cut_cmd = build_cut_command(plan, render_cfg, intermediate,
@@ -558,19 +595,38 @@ def render(plan: EditPlan, config, ass_path: Path | None, output: Path, work_dir
         log(f"1/2 컷 편집 건너뜀 (기존 {job.intermediate.name} 사용)")
     elif job.segmented:
         progress("컷 편집", 0.0)
-        log(f"1/2 하이라이트 {len(plan.clips)}개 컷 편집 중… (조각별) → {job.intermediate}")
         total = len(job.segment_cmds)
+        seg_dir = job.segment_files[0].parent
+        done = reusable_segments(job, seg_dir)
+        log(f"1/2 하이라이트 {len(plan.clips)}개 컷 편집 중… "
+            f"(조각 {total}개) → {job.intermediate}")
+        if done:
+            log(f"      · {done}개는 지난번에 만들어 둔 걸 그대로 씁니다 (이어하기)")
+        free = available_memory_mb()
+        if free:
+            log(f"      · 지금 쓸 수 있는 메모리 {free:.0f}MB")
+
         for i, cmd in enumerate(job.segment_cmds, start=1):
+            piece = job.segment_files[i - 1]
+            if piece.is_file():
+                progress("컷 편집", 0.5 * i / total)
+                continue                       # 이어하기
             run_stage(cmd)
+            part_path(piece).replace(piece)    # 다 됐을 때만 이름을 바꾼다
             progress("컷 편집", 0.5 * i / total)
-            if i % 10 == 0 or i == total:
-                log(f"      {i}/{total} 조각")
+            if i % 5 == 0 or i == total:
+                free = available_memory_mb()
+                room = f" · 남은 메모리 {free:.0f}MB" if free else ""
+                log(f"      {i}/{total} 조각{room}")
         list_file = write_concat_list(job.segment_files, job.segment_files[0].parent / "list.txt")
         run(job.concat_cmd, capture=True, nice=nice)
+        # 조각은 합쳐진 뒤에만 지운다. 여기까지 못 오고 죽으면 그대로 남아서
+        # 다음에 이어할 수 있다.
         if not config.get("render.keep_intermediate", False):
             for piece in job.segment_files:
                 piece.unlink(missing_ok=True)
             list_file.unlink(missing_ok=True)
+            (seg_dir / "fingerprint.txt").unlink(missing_ok=True)
     else:
         progress("컷 편집", 0.0)
         log(f"1/2 하이라이트 {len(plan.clips)}개 컷 편집 중… → {job.intermediate}")

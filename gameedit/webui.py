@@ -225,6 +225,14 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
       <div class="bar"><i id="job-bar"></i></div>
       <div class="muted" id="job-sum"></div>
     </div>
+    <div id="job-retry" style="display:none">
+      <div class="card">
+        <div class="label">중간에 멈췄습니다</div>
+        <div class="sub">이미 만들어 둔 조각은 그대로 두고 <b>멈춘 데부터 이어서</b>
+             만듭니다. 처음부터 다시 하지 않습니다.</div>
+      </div>
+      <button class="btn" onclick="resume()">▶️ 이어서 만들기</button>
+    </div>
     <div id="job-result" style="display:none">
       <h2>미리보기</h2>
       <video id="job-video" controls playsinline preload="metadata"></video>
@@ -587,6 +595,7 @@ async function poll(){
       j.status==='done' ? '✅ 완성됐습니다' :
       j.status==='error' ? '❌ ' + (j.error||'실패') : j.step;
     $('job-bar').style.width = (j.progress*100) + '%';
+    $('job-retry').style.display = j.status==='error' ? 'block' : 'none';
     if (j.status === 'done' && j.summary.fallback)
       $('job-step').textContent = '✅ 완성 (신호가 약해 균등 간격으로 잘랐습니다)';
     $('job-sum').textContent = j.status==='done' && j.summary.clips ?
@@ -647,6 +656,19 @@ function toggleClip(i){
   renderEdit();
 }
 function editSub(i, text){ state.edits[i] = text; }
+
+// 앱이 죽어서 멈춘 편집을 이어서. 만들어 둔 조각은 그대로 쓴다.
+async function resume(){
+  if (!state.job) return;
+  try{
+    await api(`/api/jobs/${state.job}/replan`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: '{}'
+    });
+    toast('멈춘 데부터 이어서 만듭니다');
+    $('job-retry').style.display = 'none';
+    poll();
+  } catch(e){ if (e) toast(e.message); }
+}
 
 async function replan(){
   if (state.removed.size >= state.plan.clips.length){ toast('클립을 최소 하나는 남겨 주세요'); return; }

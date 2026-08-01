@@ -216,7 +216,8 @@ class JobManager:
                 job.summary = self._summary(plan)
             else:
                 job.status, job.step = "error", "중단됨"
-                job.error = "이전에 중간에 멈춘 작업입니다"
+                job.error = ("중간에 멈췄습니다 — '이어서 만들기' 를 누르면 "
+                             "만들어 둔 조각부터 이어서 합니다")
             found.append((plan_path.stat().st_mtime, job))
 
         with self.lock:

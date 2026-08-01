@@ -470,3 +470,82 @@ def test_unknown_free_memory_does_not_shrink_anything():
     from gameedit.render import resolve_batch
 
     assert resolve_batch({"segment_batch": 6}, 1280, 720, free_mb=0.0) == 6
+
+
+# ------------------------------------------------------------ 이어하기
+
+def _seg_job(tmp_path, clips=12, width=2000, height=1200):
+    from gameedit.config import Config
+    from gameedit.models import Clip, EditPlan, MediaInfo
+    from gameedit.render import build_render_job
+
+    plan = EditPlan(source="/tmp/a.mp4",
+                    media=MediaInfo(path="/tmp/a.mp4", duration=600.0,
+                                    width=width, height=height, fps=30.0))
+    plan.clips = [Clip(source_start=i * 10.0, source_end=i * 10.0 + 5.0)
+                  for i in range(clips)]
+    plan.relayout()
+    return build_render_job(plan, Config().with_profile("phone"), None,
+                            tmp_path / "out.mp4", tmp_path / "work")
+
+
+def test_segments_are_written_to_a_temp_name_first(tmp_path):
+    """도중에 죽으면 반쯤 쓰다 만 파일이 남는다. 그걸 완성품으로 착각하면
+    영상이 중간에 끊긴 채로 이어 붙는다."""
+    from gameedit.render import part_path
+
+    job = _seg_job(tmp_path)
+    for piece, cmd in zip(job.segment_files, job.segment_cmds):
+        assert cmd[-1] == str(part_path(piece))
+        assert cmd[-1] != str(piece)
+
+
+def test_finished_segments_are_reused(tmp_path):
+    from gameedit.render import reusable_segments
+
+    job = _seg_job(tmp_path)
+    seg_dir = job.segment_files[0].parent
+    assert reusable_segments(job, seg_dir) == 0        # 처음엔 없다
+
+    for piece in job.segment_files[:3]:
+        piece.write_bytes(b"\x00" * 2048)
+    assert reusable_segments(job, seg_dir) == 3
+
+
+def test_half_written_segments_are_thrown_away(tmp_path):
+    from gameedit.render import part_path, reusable_segments
+
+    job = _seg_job(tmp_path)
+    seg_dir = job.segment_files[0].parent
+    reusable_segments(job, seg_dir)                    # 지문 기록
+    job.segment_files[0].write_bytes(b"\x00" * 2048)
+    leftover = part_path(job.segment_files[1])
+    leftover.write_bytes(b"\x00" * 500)
+
+    assert reusable_segments(job, seg_dir) == 1
+    assert not leftover.exists()
+
+
+def test_changing_the_edit_discards_old_segments(tmp_path):
+    """설정을 바꿔 다시 만들 때 예전 조각을 이어 붙이면 다른 영상이 섞인다."""
+    from gameedit.render import reusable_segments
+
+    job = _seg_job(tmp_path, clips=12)
+    seg_dir = job.segment_files[0].parent
+    reusable_segments(job, seg_dir)
+    for piece in job.segment_files:
+        piece.write_bytes(b"\x00" * 2048)
+    assert reusable_segments(job, seg_dir) == len(job.segment_files)
+
+    other = _seg_job(tmp_path, clips=12, width=1280, height=720)  # 편집이 달라짐
+    assert reusable_segments(other, seg_dir) == 0
+    assert not any(p.exists() for p in job.segment_files)
+
+
+def test_phone_profile_limits_expensive_bridges():
+    """8배속 브릿지는 결과물 1초에 원본 8초를 읽는다. 폰에서는 짧게만."""
+    from gameedit.config import Config
+
+    phone = Config().with_profile("phone")
+    assert phone.get("editing.bridge_max") < Config().get("editing.bridge_max")
+    assert phone.get("editing.bridge_speed") <= Config().get("editing.bridge_speed")
