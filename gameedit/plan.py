@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .config import Config
 from .editing import apply_editing, editing_summary
+from .glossary import load_glossary, plan_glossary_cues
 from .highlights import build_clips
 from .memes import load_packs, plan_memes
 from .models import Analysis, EditPlan, plan_from_dict, load_json
@@ -27,6 +28,13 @@ def build_plan(analysis: Analysis, config: Config) -> EditPlan:
     plan.memes = plan_memes(plan, analysis, memes, meme_cfg)
     plan.subtitles = build_subtitle_cues(plan, analysis, config.section("subtitles"))
 
+    # 용어 설명 자막 (포켓몬 타입 등). 미리 받아 둔 사전 파일에서만 읽는다.
+    gloss_cfg = config.section("glossary")
+    glossary = load_glossary(gloss_cfg.get("files", [])) if gloss_cfg.get("enabled") else {}
+    if glossary:
+        plan.subtitles.extend(plan_glossary_cues(plan, analysis, glossary, gloss_cfg))
+        plan.subtitles.sort(key=lambda c: c.start)
+
     source_duration = analysis.media.duration or 1.0
     plan.meta = {
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -44,6 +52,7 @@ def build_plan(analysis: Analysis, config: Config) -> EditPlan:
         # plan.json 에 남으니 사람이 보고 고칠 수도 있다.
         "highlight_words": resolve_highlight_words(config.section("subtitles"),
                                                    analysis.transcript),
+        "glossary_terms": len([c for c in plan.subtitles if c.speaker == "glossary"]),
         "editing": editing_summary(plan.clips, edit_cfg),
     }
     return plan

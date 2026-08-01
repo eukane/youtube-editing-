@@ -97,6 +97,8 @@ class Job:
             "created_at": self.created_at,
             "has_output": bool(self.output) and Path(self.output).exists(),
             "summary": self.summary,
+            "wish_matched": self.options.get("wish_matched", []),
+            "wish_ignored": self.options.get("wish_ignored", []),
             "log": self.log[-40:],
         }
 
@@ -276,6 +278,13 @@ class JobManager:
             config.set("project.resolution", "1080x1920")
         for key, value in EDIT_PACE.get(job.options.get("pace") or "", {}).items():
             config.set(key, value)
+        # 손으로 적은 요구사항은 프리셋보다 뒤에 적용해서 그쪽이 이기게 한다
+        wishes = job.options.get("wishes") or ""
+        if wishes:
+            from .wishes import apply as apply_wishes
+            got = apply_wishes(config, wishes)
+            job.options["wish_matched"] = got.matched
+            job.options["wish_ignored"] = got.ignored
         style = job.options.get("style") or ""
         if style:
             from .styles import get as get_style
@@ -663,6 +672,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/files/delete":
             self._handle_delete_file()
             return
+        if path == "/api/wishes/check":
+            from .wishes import parse as parse_wishes
+            data = self._read_json_body()
+            self._send_json(parse_wishes(str(data.get("wishes") or "")[:500]).as_dict())
+            return
 
         m = re.match(r"^/api/jobs/([0-9a-f]+)/replan$", path)
         if m:
@@ -822,6 +836,7 @@ class Handler(BaseHTTPRequestHandler):
             "pace": resolve_pace(data.get("pace")),
             "style": resolve_style(data.get("style")),
             "subs": self._checked_subs(data.get("subs")),
+            "wishes": str(data.get("wishes") or "")[:500],
         }
         job = self.manager.create(source, options)
         self._send_json(job.as_dict())

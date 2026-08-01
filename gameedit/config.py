@@ -156,6 +156,17 @@ DEFAULTS: dict[str, Any] = {
         "transition_sfx": "전환",
         "transition_sfx_volume": 0.45,
     },
+    # 대사에 나온 이름에 작은 설명 자막을 붙인다 (포켓몬 타입 등).
+    # 사전은 미리 받아 둔 파일에서 읽는다. 편집 중에는 인터넷을 쓰지 않는다.
+    "glossary": {
+        "enabled": False,       # 사전을 지정해야 의미가 있으므로 기본은 끔
+        "files": [],            # 예: ["pokemon.json"] (assets/glossary 안이면 이름만)
+        "duration": 2.4,
+        "cooldown": 90.0,       # 같은 용어를 다시 설명하기까지 최소 간격(초)
+        "once_per_term": False, # True 면 용어마다 딱 한 번만
+        "max_total": 40,
+        "format": "{term} · {info}",
+    },
     # 고른 구간을 '편집'으로 만드는 단계. 자세한 근거는 editing.py 참고.
     "editing": {
         "enabled": True,

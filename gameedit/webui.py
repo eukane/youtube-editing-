@@ -159,6 +159,15 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
     <div class="chips" id="paces"></div>
     <div class="muted" id="pace-hint" style="margin:6px 2px 0"></div>
 
+    <h2>요구사항 (직접 적기)</h2>
+    <div class="card">
+      <textarea id="wishes" rows="3" oninput="checkWishes()"
+        placeholder="예) 3분으로, 죽는 장면 위주로, 자막 크게, 포켓몬 타입 알려줘"></textarea>
+      <div class="muted" id="wish-out" style="margin-top:10px">
+        적은 대로 알아들었는지 여기에 바로 보여 드립니다.
+      </div>
+    </div>
+
     <h2>편집 옵션</h2>
     <div class="card">
       <div class="row">
@@ -369,6 +378,8 @@ function openOptions(file){
   $('lens').innerHTML = state.lengths.map(n =>
     `<div class="chip ${n===state.target?'on':''}" onclick="setLen(${n})">${n}분</div>`).join('');
   state.subs = '';
+  state.wishes = '';
+  if ($('wishes')) $('wishes').value = '';
   $('subs-name').textContent = '유튜브 자동자막·클로바노트 등에서 받은 .srt';
   state.style = state.style || '';
   $('styles').innerHTML = STYLES.map(([id,name]) =>
@@ -403,6 +414,26 @@ function setPace(id){
 async function action(){
   if (state.view === 'opt') return startJob();
   if (state.view === 'edit') return replan();
+}
+
+let wishTimer = null;
+function checkWishes(){
+  clearTimeout(wishTimer);
+  wishTimer = setTimeout(async () => {
+    const text = $('wishes').value.trim();
+    state.wishes = text;
+    if (!text){ $('wish-out').textContent = '적은 대로 알아들었는지 여기에 바로 보여 드립니다.'; return; }
+    try{
+      const r = await api('/api/wishes/check', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({wishes: text})
+      });
+      const ok = (r.matched||[]).map(m => `✅ ${esc(m)}`).join('<br>');
+      const no = (r.ignored||[]).map(m => `❓ <b>${esc(m)}</b> — 이 말은 못 알아들어서 그냥 넘어갑니다`).join('<br>');
+      $('wish-out').innerHTML = [ok, no].filter(Boolean).join('<br>')
+        || '❓ 알아들은 게 없습니다. 아래 예시처럼 적어 보세요.';
+    } catch(e){ /* 서버가 잠깐 안 받아도 입력은 계속 가능해야 한다 */ }
+  }, 400);
 }
 
 async function pickSubs(input){
@@ -447,6 +478,7 @@ async function startJob(){
         pace: state.pace || 'normal',
         style: state.style || '',
         subs: state.subs || '',
+        wishes: state.wishes || '',
       })
     });
     openJob(job.id);
