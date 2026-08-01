@@ -363,16 +363,36 @@ def with_title_card(sub_cfg: dict, project_cfg: dict, plan=None) -> dict:
     merged = dict(sub_cfg,
                   title=project_cfg.get("title", ""),
                   title_date=project_cfg.get("title_date", ""),
-                  title_seconds=project_cfg.get("title_seconds", 2.5))
+                  title_seconds=project_cfg.get("title_seconds", 2.5),
+                  shorts_title=project_cfg.get("shorts_title", ""),
+                  channel=project_cfg.get("channel", ""))
     words = (getattr(plan, "meta", None) or {}).get("highlight_words") if plan else None
     if words and not _as_word_list(sub_cfg.get("highlight_words", [])):
         merged["highlight_words"] = list(words)
     return merged
 
 
+def content_box_height(src_w: int, src_h: int, out_w: int, out_h: int) -> float:
+    """원본을 출력 화면에 맞춰 넣었을 때 **영상이 실제로 차지하는 높이**.
+
+    나머지 위아래가 빈 띠다. 쇼츠에서 제목·채널명을 넣을 자리를 여기서 잰다.
+    """
+    if min(src_w or 0, src_h or 0, out_w or 0, out_h or 0) <= 0:
+        return float(out_h or 0)
+    scale = min(out_w / src_w, out_h / src_h)
+    return min(float(out_h), src_h * scale)
+
+
 def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
-              *, width: int = 1920, height: int = 1080) -> str:
+              *, width: int = 1920, height: int = 1080,
+              content_height: float = 0.0, total_duration: float = 0.0) -> str:
+    out_h = height or 1
     width, height = reference_resolution(width, height)
+    # 자막 좌표계로 환산 (실제 픽셀이 아니라 PlayRes 기준으로 그린다)
+    band_content_height = (content_height / out_h * height) if content_height else 0.0
+    if not total_duration:
+        total_duration = max([c.end for c in cues] + [m.start + m.duration for m in meme_cues]
+                             + [1.0])
     font = cfg.get("font", "Noto Sans CJK KR")
     if cfg.get("font_fallback", True):
         font = resolve_font(font)
@@ -398,6 +418,15 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     impact_color = palette[0]
     two_tier = bool(cfg.get("two_tier", False))
     two_tier_gap = float(cfg.get("two_tier_gap", 3.0))
+
+    # 세로(쇼츠)에서 위아래 빈 띠. 대사 자막이 이 띠까지 내려가면 채널명과
+    # 겹친다. 실제로 겹쳐서 글자가 포개졌다. 자막은 영상 안쪽에 붙인다.
+    band = max(0.0, (height - float(band_content_height or height)) / 2.0)
+    if band < height * 0.06:
+        band = 0.0
+    margin_v += int(band)
+    if impact_margin_v:
+        impact_margin_v += int(band)
 
     header = [
         "[Script Info]",
@@ -441,7 +470,7 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
                     primary="&H00FFFFFF", outline_color=outline_color, bold=0,
                     outline=max(1.5, outline - 1.5), shadow=1,
                     align=_ALIGN.get(cfg.get("narr_position", "top"), 8),
-                    margin_v=int(height * 0.30)),
+                    margin_v=int(height * 0.30) + int(band)),
         # 2단 자막의 윗줄 (직전 대사를 작게 남긴다)
         _style_line("Prev", font=font, size=int(size * impact_scale * 0.42),
                     primary="&H00FFFFFF", outline_color="&H00000000", bold=-1,
@@ -459,12 +488,38 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
                     align=5, margin_v=0),
         f"Style: TitleBg,{font},10,&H00000000,&H000000FF,&H00000000,&H00000000,"
         f"0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1",
+        # 쇼츠 위아래 빈 자리에 넣는 제목·채널명
+        _style_line("ShortsTitle", font=font, size=int(size * 1.25), primary="&H00FFFFFF",
+                    outline_color="&H00000000", bold=-1, outline=outline + 1, shadow=shadow,
+                    align=5, margin_v=0, margin_l=24, margin_r=24),
+        _style_line("ShortsChannel", font=font, size=int(size * 0.85),
+                    primary=cfg.get("channel_color", "&H0033E8FF"),
+                    outline_color="&H00000000", bold=-1, outline=outline, shadow=shadow,
+                    align=5, margin_v=0, margin_l=24, margin_r=24),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
 
     events: list[tuple[float, str]] = []
+
+    # 쇼츠(세로)로 뽑으면 위아래에 빈 띠가 생긴다. 실제 쇼츠들이 그 자리에
+    # 제목과 채널명을 넣는 것처럼 채운다. 띠가 좁으면 글자가 영상을 덮으므로
+    # 충분히 넓을 때만 넣는다.
+    if band >= height * 0.06:
+        shorts_title = str(cfg.get("shorts_title", "") or "").strip()
+        channel = str(cfg.get("channel", "") or "").strip()
+        span = f"{_ass_time(0.0)},{_ass_time(max(1.0, total_duration))}"
+        if shorts_title:
+            events.append((-1.0,
+                           f"Dialogue: 2,{span},ShortsTitle,shorts,0,0,0,,"
+                           f"{{\\pos({width // 2},{int(band / 2)})}}"
+                           f"{escape_ass(shorts_title)}"))
+        if channel:
+            events.append((-1.0,
+                           f"Dialogue: 2,{span},ShortsChannel,shorts,0,0,0,,"
+                           f"{{\\pos({width // 2},{int(height - band / 2)})}}"
+                           f"{escape_ass(channel)}"))
 
     # 타이틀 카드 — 영상 맨 앞에 검은 화면을 깔고 날짜·제목을 얹는다
     title = str(cfg.get("title", "") or "")
@@ -530,8 +585,11 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
 
 
 def write_ass(path: str | Path, cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
-              *, width: int = 1920, height: int = 1080) -> Path:
+              *, width: int = 1920, height: int = 1080,
+              content_height: float = 0.0, total_duration: float = 0.0) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(build_ass(cues, meme_cues, cfg, width=width, height=height), encoding="utf-8")
+    path.write_text(build_ass(cues, meme_cues, cfg, width=width, height=height,
+                              content_height=content_height, total_duration=total_duration),
+                    encoding="utf-8")
     return path

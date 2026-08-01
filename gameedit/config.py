@@ -29,6 +29,10 @@ DEFAULTS: dict[str, Any] = {
         "title": "",
         "title_date": "",
         "title_seconds": 2.5,
+        # 쇼츠(세로)로 뽑으면 위아래에 빈 띠가 생긴다. 실제 쇼츠들이 그러듯
+        # 거기에 제목과 채널명을 넣는다. 비우면 아무것도 안 넣는다.
+        "shorts_title": "",
+        "channel": "",
     },
     "analyze": {
         "scene_threshold": 0.35,

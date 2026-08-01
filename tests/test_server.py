@@ -756,3 +756,41 @@ def test_restart_without_options_file_still_restores(tmp_path):
     manager = JobManager(tmp_path, Config())
     assert manager.restore() == 1
     assert manager.get("old1234567").options == {}
+
+
+def test_shorts_title_and_channel_reach_the_config():
+    from gameedit.server import Job, JobManager
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        manager = JobManager(Path(tmp), Config())
+        job = Job(id="x", source="/tmp/a.mp4", title="a",
+                  options={"shorts": True, "shorts_title": "로토무 한 마리로 끝냄",
+                           "channel": "@내채널"})
+        cfg = manager._job_config(job)
+        assert cfg.get("project.resolution") == "1080x1920"
+        assert cfg.get("project.shorts_title") == "로토무 한 마리로 끝냄"
+        assert cfg.get("project.channel") == "@내채널"
+
+
+def test_shorts_fields_are_length_capped(server, tmp_path):
+    """화면에서 온 값은 못 믿는다. 긴 글이 오면 화면을 다 덮는다."""
+    video = tmp_path / "uploads" / "a.mp4"
+    video.parent.mkdir(parents=True, exist_ok=True)
+    video.write_bytes(b"\x00" * 100)
+    code, _ = post_json(server[0], "/api/jobs",
+                        {"path": str(video), "shorts": True,
+                         "shorts_title": "가" * 200, "channel": "나" * 200})
+    manager = server[1]
+    job = manager.jobs[list(manager.jobs)[0]]
+    assert len(job.options["shorts_title"]) == 40
+    assert len(job.options["channel"]) == 24
+
+
+def test_shorts_inputs_are_wired_in_the_page():
+    from gameedit.webui import PAGE
+
+    assert "shorts-title" in PAGE and "shorts-channel" in PAGE
+    assert "shorts_title:" in PAGE and "channel:" in PAGE
+    # 쇼츠를 켰을 때만 보여야 한다
+    assert "function toggleShorts" in PAGE

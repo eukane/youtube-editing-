@@ -16,9 +16,9 @@ from .memes import (AUDIO_EXTS, BUILTIN_PACK_DIR, IMAGE_EXTS, VIDEO_EXTS, load_p
                     missing_assets)
 from .models import Analysis, EditPlan, analysis_from_dict, load_json, save_json
 from .plan import build_plan, load_plan
-from .render import render
+from .render import render, resolve_output_size
 from .srt import write_srt
-from .subtitles import with_title_card, write_ass
+from .subtitles import content_box_height, with_title_card, write_ass
 from .timeline import write_html
 
 DURATION_RE = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s?)?$", re.IGNORECASE)
@@ -135,19 +135,17 @@ def write_plan_outputs(plan: EditPlan, analysis: Analysis | None, config: Config
     outputs["plan"] = save_json(plan, work_dir / "plan.json")
 
     sub_cfg = with_title_card(config.section("subtitles"), config.section("project"), plan)
-    width = plan.media.width or 1920
-    height = plan.media.height or 1080
-    resolution = (config.get("project.resolution") or "").lower()
-    if "x" in resolution:
-        try:
-            w, h = resolution.split("x")
-            width, height = int(w), int(h)
-        except ValueError:
-            pass
+    # 자막 좌표계는 **실제로 뽑히는 해상도**를 따라야 한다. 원본 크기를 쓰면
+    # 세로(쇼츠)로 뽑을 때 좌표계 비율이 화면과 달라져 글자가 늘어난다.
+    width, height, _fps = resolve_output_size(plan, config.section("project"))
 
     if sub_cfg.get("enabled", True) or plan.memes:
+        # 세로(쇼츠)로 뽑으면 위아래에 빈 띠가 생긴다. 그 자리에 제목·채널명을
+        # 넣으려면 영상이 실제로 차지하는 높이를 알아야 한다.
+        content_h = content_box_height(plan.media.width, plan.media.height, width, height)
         outputs["ass"] = write_ass(work_dir / "subtitles.ass", plan.subtitles, plan.memes,
-                                   sub_cfg, width=width, height=height)
+                                   sub_cfg, width=width, height=height,
+                                   content_height=content_h, total_duration=plan.duration)
     if sub_cfg.get("export_srt", True) and plan.subtitles:
         outputs["srt"] = write_srt(plan.subtitles, work_dir / "subtitles.srt")
     outputs["html"] = write_html(work_dir / "plan.html", plan, analysis,
@@ -339,10 +337,13 @@ def cmd_render(args) -> int:
     sub_cfg = config.section("subtitles")
     ass_path = None
     if sub_cfg.get("enabled", True) or plan.memes:
-        width = plan.media.width or 1920
-        height = plan.media.height or 1080
+        width, height, _fps = resolve_output_size(plan, config.section("project"))
         ass_path = write_ass(work_dir / "subtitles.ass", plan.subtitles, plan.memes,
-                             sub_cfg, width=width, height=height)
+                             sub_cfg, width=width, height=height,
+                             content_height=content_box_height(plan.media.width,
+                                                               plan.media.height,
+                                                               width, height),
+                             total_duration=plan.duration)
 
     output = Path(args.output or config.get("project.output", "out/final.mp4"))
     job = render(plan, config, ass_path, output, work_dir,

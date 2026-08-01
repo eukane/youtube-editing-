@@ -193,7 +193,18 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
       <div class="row">
         <div><div class="label">쇼츠(세로) 로 만들기</div>
              <div class="sub">1080x1920 세로 영상</div></div>
-        <div class="switch" id="sw-shorts" onclick="toggle(this)"><i></i></div>
+        <div class="switch" id="sw-shorts" onclick="toggleShorts(this)"><i></i></div>
+      </div>
+      <div id="shorts-extra" style="display:none">
+        <div class="sub muted" style="margin:4px 2px 10px">
+          가로 영상을 세로로 만들면 위아래가 빕니다. 그 자리에 넣을 글입니다.
+          비워 두면 흐린 배경만 깔립니다.
+        </div>
+        <input id="shorts-title" placeholder="위에 넣을 제목  예) 로토무 한 마리로 끝냄"
+               maxlength="40" oninput="state.shortsTitle=this.value">
+        <input id="shorts-channel" placeholder="아래에 넣을 채널명  예) @내채널"
+               maxlength="24" style="margin-top:8px"
+               oninput="state.channel=this.value">
       </div>
     </div>
 
@@ -302,6 +313,10 @@ function go(view){
 $('back').onclick = () => go(state.view === 'edit' ? 'job' : 'home');
 
 function toggle(el){ el.classList.toggle('on'); }
+function toggleShorts(el){
+  toggle(el);
+  $('shorts-extra').style.display = el.classList.contains('on') ? 'block' : 'none';
+}
 
 /* ---------------- 업로드 ---------------- */
 function pick(input){
@@ -408,6 +423,12 @@ function openOptions(file){
   state.wishes = '';
   if ($('wishes')) $('wishes').value = '';
   resetSpeed();          // 다른 영상을 골랐는데 지난 결과가 남아 있으면 오해한다
+  state.shortsTitle = state.shortsTitle || '';
+  state.channel = state.channel || '';
+  if ($('shorts-title')) $('shorts-title').value = state.shortsTitle;
+  if ($('shorts-channel')) $('shorts-channel').value = state.channel;
+  $('shorts-extra').style.display =
+    $('sw-shorts').classList.contains('on') ? 'block' : 'none';
   $('subs-name').textContent = '유튜브 자동자막·클로바노트 등에서 받은 .srt';
   state.style = state.style || '';
   $('styles').innerHTML = STYLES.map(([id,name]) =>
@@ -567,6 +588,8 @@ async function startJob(){
         no_memes: !$('sw-meme').classList.contains('on'),
         no_subtitles: !$('sw-sub').classList.contains('on'),
         shorts: $('sw-shorts').classList.contains('on'),
+        shorts_title: (state.shortsTitle||'').slice(0,40),
+        channel: (state.channel||'').slice(0,24),
         pace: state.pace || 'normal',
         style: state.style || '',
         subs: state.subs || '',

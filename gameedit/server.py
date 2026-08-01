@@ -30,8 +30,8 @@ from .config import Config
 from .media import extract_thumbnail, format_timecode
 from .models import EditPlan, analysis_from_dict, load_json, plan_from_dict, save_json
 from .plan import build_plan
-from .render import render
-from .subtitles import with_title_card, write_ass
+from .render import render, resolve_output_size
+from .subtitles import content_box_height, with_title_card, write_ass
 from .webui import PAGE
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".ts", ".flv"}
@@ -344,6 +344,11 @@ class JobManager:
             config.set("transcribe.backend", "external")
         if job.options.get("shorts"):
             config.set("project.resolution", "1080x1920")
+            # 세로로 만들면 위아래가 빈다. 실제 쇼츠들처럼 그 자리를 채운다.
+            for key, limit in (("shorts_title", 40), ("channel", 24)):
+                text = str(job.options.get(key) or "").strip()[:limit]
+                if text:
+                    config.set(f"project.{key}", text)
         for key, value in EDIT_PACE.get(job.options.get("pace") or "", {}).items():
             config.set(key, value)
         # 손으로 적은 요구사항은 프리셋보다 뒤에 적용해서 그쪽이 이기게 한다
@@ -420,9 +425,14 @@ class JobManager:
         sub_cfg = with_title_card(config.section("subtitles"), config.section("project"), plan)
         ass_path = None
         if sub_cfg.get("enabled", True) or plan.memes:
+            # 원본 크기가 아니라 실제로 뽑히는 크기를 써야 한다. 세로(쇼츠)로
+            # 뽑을 때 자막 좌표계 비율이 화면과 달라져 글자가 늘어났다.
+            width, height, _fps = resolve_output_size(plan, config.section("project"))
             ass_path = write_ass(work_dir / "subtitles.ass", plan.subtitles, plan.memes,
-                                 sub_cfg, width=plan.media.width or 1920,
-                                 height=plan.media.height or 1080)
+                                 sub_cfg, width=width, height=height,
+                                 content_height=content_box_height(
+                                     plan.media.width, plan.media.height, width, height),
+                                 total_duration=plan.duration)
 
         def on_step(label: str, fraction: float) -> None:
             job.step = label
@@ -921,6 +931,9 @@ class Handler(BaseHTTPRequestHandler):
             "style": resolve_style(data.get("style")),
             "subs": self._checked_subs(data.get("subs")),
             "wishes": str(data.get("wishes") or "")[:500],
+            # 쇼츠 위아래 빈 자리에 넣을 글. 길이를 여기서 자른다.
+            "shorts_title": str(data.get("shorts_title") or "").strip()[:40],
+            "channel": str(data.get("channel") or "").strip()[:24],
         }
         job = self.manager.create(source, options)
         self._send_json(job.as_dict())

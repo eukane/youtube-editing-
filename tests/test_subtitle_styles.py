@@ -347,3 +347,77 @@ def test_colour_is_reserved_for_emphasis(scfg):
     assert styles["Narr"] == "&H00FFFFFF"
     assert styles["Emph"] == "&H0033E8FF"      # 노랑
     assert styles["Impact"] == "&H002020F0"    # 빨강
+
+
+# ------------------------------------------- 쇼츠 위아래 빈 자리 채우기
+
+import re as _re
+
+from gameedit.subtitles import build_ass, content_box_height
+
+
+def _shorts_ass(**over):
+    cfg = dict(Config().section("subtitles"))
+    cfg.update(shorts_title="로토무 한 마리로 끝냄", channel="@내채널")
+    cfg.update(over)
+    cues = [SubtitleCue(start=1.0, end=4.0, lines=["아니 로토무가", "왜 여기서 나와"])]
+    # 2000x1200 가로 원본을 1080x1920 세로로 (실제로 나온 경우)
+    ch = content_box_height(2000, 1200, 1080, 1920)
+    return build_ass(cues, [], cfg, width=1080, height=1920,
+                     content_height=ch, total_duration=30.0)
+
+
+def test_content_box_height():
+    assert content_box_height(1920, 1080, 1920, 1080) == pytest.approx(1080)
+    assert content_box_height(2000, 1200, 1080, 1920) == pytest.approx(648)
+    assert content_box_height(0, 0, 1080, 1920) == 1920
+
+
+def test_shorts_fills_the_empty_bands_with_title_and_channel():
+    body = _shorts_ass()
+    assert ",ShortsTitle," in body and "로토무 한 마리로 끝냄" in body
+    assert ",ShortsChannel," in body and "@내채널" in body
+
+
+def test_shorts_text_is_placed_inside_the_bands():
+    """제목은 위 띠 안, 채널명은 아래 띠 안에 있어야 한다."""
+    body = _shorts_ass()
+    ref_h = 1080                                  # PlayResY
+    band = (1920 - 648) / 2 / 1920 * ref_h        # 자막 좌표계에서의 띠 높이
+    title_y = int(_re.search(r"ShortsTitle.*?\\pos\(\d+,(\d+)\)", body).group(1))
+    chan_y = int(_re.search(r"ShortsChannel.*?\\pos\(\d+,(\d+)\)", body).group(1))
+    assert 0 < title_y < band
+    assert ref_h - band < chan_y < ref_h
+
+
+def test_dialogue_does_not_land_on_the_channel_name():
+    """실제로 겹쳐서 글자가 포개졌다. 대사는 영상 안쪽에 붙어야 한다."""
+    body = _shorts_ass()
+    ref_h = 1080
+    band = (1920 - 648) / 2 / 1920 * ref_h
+    main = [ln for ln in body.splitlines() if ln.startswith("Style: Main,")][0]
+    margin_v = int(main.split(",")[-2])
+    assert margin_v >= band, "대사 자막이 아래 띠까지 내려간다 (채널명과 겹침)"
+
+
+def test_nothing_added_when_there_is_no_empty_band():
+    """16:9 원본을 16:9 로 뽑으면 빈 자리가 없다. 글자를 넣으면 화면을 가린다."""
+    cfg = dict(Config().section("subtitles"), shorts_title="제목", channel="@채널")
+    body = build_ass([SubtitleCue(start=0.0, end=2.0, lines=["대사"])], [], cfg,
+                     width=1280, height=720,
+                     content_height=content_box_height(1920, 1080, 1280, 720),
+                     total_duration=10.0)
+    assert ",ShortsTitle," not in body and ",ShortsChannel," not in body
+
+
+def test_empty_title_and_channel_add_nothing():
+    body = _shorts_ass(shorts_title="", channel="")
+    assert ",ShortsTitle," not in body and ",ShortsChannel," not in body
+
+
+def test_banner_covers_the_whole_video():
+    """중간에 사라지면 어색하다. 처음부터 끝까지 떠 있어야 한다."""
+    body = _shorts_ass()
+    line = [ln for ln in body.splitlines() if ",ShortsTitle," in ln][0]
+    assert line.split(",")[1].strip() == "0:00:00.00"
+    assert line.split(",")[2].strip() == "0:00:30.00"
