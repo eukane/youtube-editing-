@@ -101,6 +101,36 @@ def resolve_threads(cfg: dict) -> int:
     return max(1, cores + raw)
 
 
+def padding_ratio(src_w: int, src_h: int, out_w: int, out_h: int) -> float:
+    """원본을 출력 화면에 맞춰 넣었을 때 **검은 여백이 차지하는 비율**."""
+    if min(src_w or 0, src_h or 0, out_w or 0, out_h or 0) <= 0:
+        return 0.0
+    scale = min(out_w / src_w, out_h / src_h)
+    covered = (src_w * scale) * (src_h * scale)
+    return max(0.0, 1.0 - covered / (out_w * out_h))
+
+
+# 여백이 이보다 크면 검정 대신 흐린 배경으로 채운다. 가로 게임 화면을
+# 세로(쇼츠)로 뽑으면 여백이 66% 까지 간다 — 화면의 2/3 가 검정이 된다.
+FILL_BACKGROUND_MIN = 0.12
+
+
+def _background_chain(width: int, height: int) -> list[str]:
+    """뒤에 깔 흐린 배경.
+
+    가우시안 블러는 폰에서 비싸다. 아주 작게 줄였다가 다시 키우면 같은
+    '뿌연' 느낌을 훨씬 싸게 얻는다. 앞의 영상이 묻히지 않게 조금 어둡게 한다.
+    """
+    small_h = max(8, height // 24)
+    return [
+        f"scale={width}:{height}:force_original_aspect_ratio=increase",
+        f"crop={width}:{height}",
+        f"scale=-2:{small_h}",
+        f"scale={width}:{height}:flags=bilinear",
+        "eq=brightness=-0.18:saturation=0.7",
+    ]
+
+
 def _clip_video_chain(clip, cfg: dict, *, width: int, height: int, fps: float,
                       duration: float, speed: float, trim: bool) -> list[str]:
     """클립 하나의 영상 필터. 한 번에 붙이든 따로 뽑든 결과가 같아야 한다."""
@@ -137,6 +167,40 @@ def _clip_video_chain(clip, cfg: dict, *, width: int, height: int, fps: float,
     return chain
 
 
+def clip_video_graph(clip, cfg: dict, *, index: int, width: int, height: int, fps: float,
+                     duration: float, speed: float, trim: bool,
+                     src_width: int = 0, src_height: int = 0) -> str:
+    """클립 하나의 영상 필터 그래프 (입출력 라벨은 부르는 쪽이 붙인다).
+
+    여백이 클 때는 `pad` 로 검정을 채우는 대신, 같은 화면을 크게 늘려 흐리게
+    만든 배경 위에 얹는다. 가로 게임 화면을 세로(쇼츠)로 뽑을 때 화면의
+    2/3 가 검정으로 나오던 문제 때문이다. 잘라서 채우는 방법도 있지만
+    게임은 화면 가장자리에 체력바·버튼이 있어서 잘리면 안 된다.
+    """
+    chain = _clip_video_chain(clip, cfg, width=width, height=height, fps=fps,
+                              duration=duration, speed=speed, trim=trim)
+    band = max(0.0, min(0.25, float(cfg.get("letterbox", 0.0) or 0.0)))
+    mode = cfg.get("fill_background", "auto")
+    want = mode if isinstance(mode, bool) else \
+        padding_ratio(src_width, src_height, width, height) >= FILL_BACKGROUND_MIN
+    # 레터박스는 일부러 넣은 검은 띠다. 거기까지 채우면 의도가 사라진다.
+    if not want or band > 0:
+        return ",".join(chain)
+
+    pad_at = next((i for i, f in enumerate(chain) if f.startswith("pad=")), -1)
+    if pad_at < 0:
+        return ",".join(chain)
+    head, tail = chain[:pad_at], chain[pad_at + 1:]      # pad 를 빼고 앞뒤로 나눈다
+    fit = head.pop()                                     # scale=...:decrease
+    tag = f"bg{index}"
+    return (
+        f"{','.join(head)}{',' if head else ''}split=2[{tag}a][{tag}b];"
+        f"[{tag}a]{','.join(_background_chain(width, height))}[{tag}c];"
+        f"[{tag}b]{fit}[{tag}d];"
+        f"[{tag}c][{tag}d]overlay=(W-w)/2:(H-h)/2,{','.join(tail)}"
+    )
+
+
 def _clip_audio_chain(cfg: dict, *, duration: float, speed: float, trim: bool,
                       start: float = 0.0, end: float = 0.0) -> list[str]:
     fade = float(cfg.get("clip_fade", 0.12))
@@ -167,11 +231,12 @@ def build_cut_filter(plan: EditPlan, cfg: dict, *, width: int, height: int,
         start, end = clip.source_start, clip.source_end
         speed = max(1.0, float(getattr(clip, "speed", 1.0) or 1.0))
         duration = max(0.05, (end - start) / speed)
-        video = _clip_video_chain(clip, cfg, width=width, height=height, fps=fps,
-                                  duration=duration, speed=speed, trim=True)
+        video = clip_video_graph(clip, cfg, index=i, width=width, height=height, fps=fps,
+                                 duration=duration, speed=speed, trim=True,
+                                 src_width=plan.media.width, src_height=plan.media.height)
         audio = _clip_audio_chain(cfg, duration=duration, speed=speed, trim=True,
                                   start=start, end=end)
-        parts.append(f"[0:v]{','.join(video)}[v{i}]")
+        parts.append(f"[0:v]{video}[v{i}]")
         parts.append(f"[{audio_src}]{','.join(audio)}[a{i}]")
         labels.append(f"[v{i}][a{i}]")
 
@@ -180,7 +245,8 @@ def build_cut_filter(plan: EditPlan, cfg: dict, *, width: int, height: int,
 
 
 def build_segment_command(clip, cfg: dict, source: str, output: Path, *,
-                          width: int, height: int, fps: float, has_audio: bool) -> list[str]:
+                          width: int, height: int, fps: float, has_audio: bool,
+                          src_width: int = 0, src_height: int = 0) -> list[str]:
     """클립 **하나**만 잘라 내는 명령.
 
     지금까지는 클립 N 개를 `trim` 필터 N 개로 만들어 한 번에 돌렸다. 그러면
@@ -202,11 +268,12 @@ def build_segment_command(clip, cfg: dict, source: str, output: Path, *,
         cmd += ["-f", "lavfi", "-t", f"{duration:.3f}",
                 "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
 
-    video = _clip_video_chain(clip, cfg, width=width, height=height, fps=fps,
-                              duration=duration, speed=speed, trim=False)
+    video = clip_video_graph(clip, cfg, index=0, width=width, height=height, fps=fps,
+                             duration=duration, speed=speed, trim=False,
+                             src_width=src_width, src_height=src_height)
     audio = _clip_audio_chain(cfg, duration=duration, speed=speed, trim=False)
     cmd += [
-        "-vf", ",".join(video),
+        "-vf", video,
         "-af", ",".join(audio),
         "-map", "0:v:0", "-map", ("0:a:0" if has_audio else "1:a:0"),
         "-c:v", cfg.get("video_codec", "libx264"),

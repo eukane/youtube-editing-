@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from .config import Config
-from .editing import apply_editing, editing_summary
+from .editing import apply_editing, cold_open_length, editing_summary
 from .glossary import load_glossary, plan_glossary_cues
 from .highlights import build_clips
 from .memes import load_packs, plan_memes
@@ -18,7 +18,16 @@ def build_plan(analysis: Analysis, config: Config) -> EditPlan:
     plan = EditPlan(source=analysis.media.path, media=analysis.media)
     edit_cfg = config.section("editing")
     # 1단계: 어디를 쓸지 고른다. 2단계: 그걸 편집본으로 만든다.
-    selected = build_clips(analysis, config.section("highlight"))
+    #
+    # 도입부는 본편 장면을 한 번 더 보여 주는 것이라 완성본이 그만큼 길어진다.
+    # 고르는 단계에서 미리 자리를 비워 두지 않으면 화면에서 고른 길이를
+    # 매번 초과한다 (실측 +5.0초, 30초 목표에서는 +17%).
+    hl_cfg = dict(config.section("highlight"))
+    reserve = cold_open_length(edit_cfg)
+    target = float(hl_cfg.get("target_duration", 480.0))
+    if reserve > 0 and target > reserve * 2:
+        hl_cfg["target_duration"] = target - reserve
+    selected = build_clips(analysis, hl_cfg)
     plan.clips = apply_editing(selected, analysis, edit_cfg)
     plan.relayout()
 

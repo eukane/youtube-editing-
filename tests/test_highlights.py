@@ -111,3 +111,75 @@ def test_video_shorter_than_min_clip_uses_whole_thing(analysis, hcfg):
     assert len(clips) == 1
     assert clips[0].source_start == 0.0
     assert clips[0].source_end == 4.0
+
+
+# ------------------------------------------------------- 목표 길이 지키기
+
+def _varied_analysis(duration=180.0):
+    """소리가 오르내리는 가짜 실황 (20초 주기로 크게-조용-중간)."""
+    from gameedit.models import Analysis, AudioAnalysis, MediaInfo
+
+    hop = 0.5
+    n = int(duration / hop)
+    excitement = []
+    for i in range(n):
+        phase = (i * hop) % 20
+        excitement.append(0.95 if phase < 6 else (0.05 if phase < 13 else 0.45))
+    audio = AudioAnalysis(
+        hop=hop, rms_db=[-20.0] * n, excitement=excitement,
+        peaks=[(float(t), 0.95) for t in range(0, int(duration), 20)],
+        silences=[(float(t + 6), float(t + 13)) for t in range(0, int(duration), 20)])
+    return Analysis(media=MediaInfo(path="/tmp/a.mp4", duration=duration,
+                                    width=1920, height=1080, fps=30.0),
+                    audio=audio)
+
+
+@pytest.mark.parametrize("target", [20.0, 30.0, 45.0, 60.0])
+def test_selected_clips_do_not_blow_past_the_target(target):
+    """예전에는 마지막 한 클립이 통째로 목표를 넘겼다 (20초 목표에 29초).
+
+    화면에서 '3분' 을 고른 사람은 3분짜리를 기대한다.
+    """
+    from gameedit.config import Config
+    from gameedit.highlights import TARGET_TOLERANCE, build_clips
+
+    cfg = Config().with_profile("phone").section("highlight")
+    cfg["target_duration"] = target
+    clips = build_clips(_varied_analysis(), cfg)
+    total = sum(c.duration for c in clips)
+    assert total <= target * (1 + TARGET_TOLERANCE) + 0.01, \
+        f"목표 {target}s 인데 {total:.1f}s 를 골랐다"
+
+
+def test_cold_open_length_is_counted():
+    """도입부는 본편을 한 번 더 보여 주는 것이라 완성본이 그만큼 길어진다."""
+    from gameedit.editing import cold_open_length
+
+    assert cold_open_length({"cold_open": False}) == 0.0
+    assert cold_open_length({"cold_open_max": 5.0}) == 5.0
+    assert cold_open_length({"cold_open_max": 4.0, "cold_open_pieces": 3}) == 12.0
+    assert cold_open_length({"cold_open_seconds": 30.0, "cold_open_pieces": 4}) == 30.0
+
+
+@pytest.mark.parametrize("target", [30.0, 45.0, 60.0])
+def test_finished_plan_lands_near_the_requested_length(target):
+    """실측으로 도입부가 매번 +5.0초를 더하고 있었다 (30초 목표에 +17%)."""
+    from gameedit.config import Config
+    from gameedit.plan import build_plan
+
+    cfg = Config().with_profile("phone")
+    cfg.set("highlight.target_duration", target)
+    plan = build_plan(_varied_analysis(), cfg)
+    off = (plan.duration - target) / target
+    assert -0.25 <= off <= 0.15, f"목표 {target}s 인데 {plan.duration:.1f}s ({off:+.0%})"
+
+
+def test_cold_open_reservation_does_not_wipe_out_short_targets():
+    """도입부가 목표의 절반을 넘으면 빼지 않는다. 남는 게 없어진다."""
+    from gameedit.config import Config
+    from gameedit.plan import build_plan
+
+    cfg = Config().with_profile("phone")
+    cfg.set("highlight.target_duration", 8.0)      # 도입부 5초보다 조금 큰 목표
+    plan = build_plan(_varied_analysis(60.0), cfg)
+    assert plan.clips, "너무 짧은 목표에서 클립이 하나도 안 남으면 안 된다"

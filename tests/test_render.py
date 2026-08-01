@@ -549,3 +549,62 @@ def test_phone_profile_limits_expensive_bridges():
     phone = Config().with_profile("phone")
     assert phone.get("editing.bridge_max") < Config().get("editing.bridge_max")
     assert phone.get("editing.bridge_speed") <= Config().get("editing.bridge_speed")
+
+
+# --------------------------------------------- 세로(쇼츠) 여백 채우기
+
+def test_padding_ratio():
+    from gameedit.render import padding_ratio
+
+    assert padding_ratio(1920, 1080, 1920, 1080) == pytest.approx(0.0)
+    # 가로 게임 화면을 세로로 뽑으면 화면의 2/3 가 검정이 된다
+    assert padding_ratio(2000, 1200, 1080, 1920) == pytest.approx(0.6625, abs=0.01)
+    assert padding_ratio(0, 0, 1080, 1920) == 0.0
+
+
+def _graph(src, out, **cfg):
+    from gameedit.models import Clip
+    from gameedit.render import clip_video_graph
+
+    return clip_video_graph(Clip(source_start=0.0, source_end=5.0), cfg, index=0,
+                            width=out[0], height=out[1], fps=30.0, duration=5.0,
+                            speed=1.0, trim=True, src_width=src[0], src_height=src[1])
+
+
+def test_large_padding_is_filled_with_a_blurred_background():
+    """검정 66% 짜리 쇼츠가 나오면 안 된다."""
+    graph = _graph((2000, 1200), (1080, 1920))
+    assert "split=2" in graph and "overlay=" in graph
+    assert "pad=" not in graph
+
+
+def test_matching_aspect_keeps_the_simple_chain():
+    """여백이 없으면 배경 채우기는 낭비다. 폰에서 필터가 늘면 그만큼 느려진다."""
+    graph = _graph((1920, 1080), (1280, 720))
+    assert "split=2" not in graph
+    assert "pad=" in graph
+
+
+def test_deliberate_letterbox_is_not_filled():
+    """레터박스는 일부러 넣은 검은 띠다. 채우면 의도가 사라진다."""
+    graph = _graph((2000, 1200), (1080, 1920), letterbox=0.12)
+    assert "split=2" not in graph
+
+
+def test_background_fill_can_be_forced_off():
+    graph = _graph((2000, 1200), (1080, 1920), fill_background=False)
+    assert "split=2" not in graph
+
+
+def test_graph_labels_are_unique_per_clip():
+    """라벨이 겹치면 filter_complex 가 통째로 실패한다."""
+    from gameedit.models import Clip
+    from gameedit.render import clip_video_graph
+
+    tags = set()
+    for i in range(4):
+        g = clip_video_graph(Clip(source_start=float(i), source_end=float(i) + 5.0), {},
+                             index=i, width=1080, height=1920, fps=30.0, duration=5.0,
+                             speed=1.0, trim=True, src_width=2000, src_height=1200)
+        tags.add(g[g.index("split=2["):g.index("];")])
+    assert len(tags) == 4

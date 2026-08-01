@@ -259,6 +259,22 @@ def apply_zooms(clips: list[Clip], cfg: dict) -> list[Clip]:
     return clips
 
 
+def cold_open_length(cfg: dict) -> float:
+    """도입부가 완성본에 더할 길이(초).
+
+    도입부는 본편에서 **한 번 더** 보여 주는 것이라 그만큼 완성본이 길어진다.
+    이 값을 목표 길이에서 미리 빼 두지 않으면, 화면에서 "3분" 을 고른 사람이
+    3분 + 도입부 길이짜리를 받게 된다.
+    """
+    if not cfg.get("cold_open", True):
+        return 0.0
+    pieces = max(1, int(cfg.get("cold_open_pieces", 1)))
+    total = float(cfg.get("cold_open_seconds", 0.0) or 0.0)
+    if total > 0:
+        return total
+    return max(0.0, float(cfg.get("cold_open_max", 5.0))) * pieces
+
+
 def pick_cold_open(clips: list[Clip], cfg: dict, *, source_duration: float = 0.0) -> list[Clip]:
     """맨 앞에 붙일 도입부(하이라이트 선공개)를 만든다.
 
