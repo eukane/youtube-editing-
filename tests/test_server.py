@@ -13,8 +13,9 @@ import pytest
 
 from gameedit.config import Config
 from gameedit.models import Clip, EditPlan, MediaInfo, MemeCue, SubtitleCue
-from gameedit.server import (apply_phone_edits, create_server, local_ip, plan_for_phone,
-                             cleanup_old_uploads)
+from gameedit.models import save_json
+from gameedit.server import (Job, apply_phone_edits, create_server, local_ip,
+                             plan_for_phone, cleanup_old_uploads)
 
 
 @pytest.fixture
@@ -700,3 +701,58 @@ def test_speedtest_button_is_wired_to_the_api():
     # 다른 영상을 고르면 지난 결과를 지워야 한다. 안 그러면 남의 숫자를 보고 판단한다
     body = re.search(r"function openOptions\(file\)\{(.*?)\n\}", PAGE, re.S).group(1)
     assert "resetSpeed()" in body
+
+
+# --------------------------------------- Termux 가 죽었다 다시 켰을 때
+
+def test_chosen_options_survive_a_restart(tmp_path):
+    """Termux 가 죽으면 메모리에 있던 선택값이 사라진다.
+
+    그 상태로 이어서 만들면 길이·쇼츠 여부가 기본값으로 돌아가고, 만들어 둔
+    조각과 설정이 안 맞아서 전부 다시 만들게 된다. 이어하기가 무의미해진다.
+    """
+    from gameedit.models import Clip, EditPlan, MediaInfo
+    from gameedit.server import JobManager, load_job_options
+
+    manager = JobManager(tmp_path, Config())
+    work = tmp_path / "jobs" / "abc1234567"
+    work.mkdir(parents=True)
+    job = Job(id="abc1234567", source="/tmp/a.mp4", title="a",
+              options={"target_duration": 180.0, "shorts": True, "pace": "fast",
+                       "wishes": "자막 크게"})
+    job.work_dir = str(work)
+    from gameedit.server import save_job_options
+    save_job_options(job)
+    assert load_job_options(work) == job.options
+
+    plan = EditPlan(source="/tmp/a.mp4",
+                    media=MediaInfo(path="/tmp/a.mp4", duration=600.0))
+    plan.clips = [Clip(source_start=0.0, source_end=5.0)]
+    plan.relayout()
+    save_json(plan, work / "plan.json")
+
+    fresh = JobManager(tmp_path, Config())      # 서버를 새로 켠 상황
+    fresh.restore()
+    back = fresh.get("abc1234567")
+    assert back is not None
+    assert back.status == "error"
+    assert "이어서 만들기" in back.error
+    assert back.options["shorts"] is True
+    assert back.options["target_duration"] == 180.0
+
+
+def test_restart_without_options_file_still_restores(tmp_path):
+    """예전 버전에서 만든 작업에는 옵션 파일이 없다. 그래도 목록에는 떠야 한다."""
+    from gameedit.models import Clip, EditPlan, MediaInfo
+    from gameedit.server import JobManager
+
+    work = tmp_path / "jobs" / "old1234567"
+    work.mkdir(parents=True)
+    plan = EditPlan(source="/tmp/a.mp4", media=MediaInfo(path="/tmp/a.mp4", duration=60.0))
+    plan.clips = [Clip(source_start=0.0, source_end=5.0)]
+    plan.relayout()
+    save_json(plan, work / "plan.json")
+
+    manager = JobManager(tmp_path, Config())
+    assert manager.restore() == 1
+    assert manager.get("old1234567").options == {}

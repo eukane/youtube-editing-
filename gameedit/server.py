@@ -174,6 +174,33 @@ def resolve_pace(value) -> str:
     return value if isinstance(value, str) and value in EDIT_PACE else "normal"
 
 
+OPTIONS_FILE = "options.json"
+
+
+def save_job_options(job: Job) -> None:
+    """화면에서 고른 값을 작업 폴더에 남긴다.
+
+    Termux 가 죽으면 메모리에 있던 이 값이 전부 사라진다. 그 상태로 이어서
+    만들면 길이·쇼츠 여부·요구사항이 기본값으로 돌아가고, **만들어 둔 조각과
+    설정이 안 맞아서 전부 다시 만들게 된다.** 이어하기가 무의미해진다.
+    """
+    try:
+        folder = Path(job.work_dir)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / OPTIONS_FILE).write_text(
+            json.dumps(job.options, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass                     # 남기지 못해도 편집 자체는 계속돼야 한다
+
+
+def load_job_options(work_dir: Path) -> dict:
+    try:
+        data = json.loads((work_dir / OPTIONS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 class JobManager:
     """작업 큐. 한 번에 하나씩만 돌린다 (인코딩이 CPU를 다 쓰기 때문)."""
 
@@ -208,7 +235,8 @@ class JobManager:
             except (ValueError, OSError, KeyError, TypeError):
                 continue
             job = Job(id=entry.name, source=plan.source,
-                      title=Path(plan.source).stem or entry.name)
+                      title=Path(plan.source).stem or entry.name,
+                      options=load_job_options(entry))
             job.work_dir = str(entry)
             job.output = str(output)
             if output.exists():
@@ -244,6 +272,7 @@ class JobManager:
         job = Job(id=job_id, source=str(source), title=Path(source).stem, options=options)
         job.work_dir = str(self.root / "jobs" / job_id)
         job.output = str(Path(job.work_dir) / "final.mp4")
+        save_job_options(job)
         with self.lock:
             self.jobs[job_id] = job
             self.order.append(job_id)
