@@ -32,8 +32,13 @@ def fake_whisper_cpp(tmp_path, *, output=SRT, fail=False):
 
 
 def fake_model(tmp_path, name="ggml-tiny.bin"):
+    """진짜 모델처럼 보이는 파일.
+
+    크기까지 흉내 내야 한다. 껍데기 모델(whisper.cpp 의 for-tests-*.bin)을
+    거르려고 최소 크기를 보기 때문에, 4바이트짜리로는 후보에서 빠진다.
+    """
     model = tmp_path / name
-    model.write_bytes(b"ggml")
+    model.write_bytes(b"ggml" + b"\x00" * (40 * 1024 * 1024))
     return model
 
 
@@ -148,3 +153,56 @@ def test_external_backend_reads_file(tmp_path):
 def test_none_backend_returns_empty():
     result = transcribe("a.wav", {"backend": "none"}, log=lambda m: None)
     assert result.segments == []
+
+
+# ------------------------------------------- 가짜(테스트용) 모델 걸러내기
+
+def test_whisper_cpp_test_models_are_ignored(tmp_path, monkeypatch):
+    """whisper.cpp 저장소의 `for-tests-*.bin` 은 가중치가 없는 껍데기다.
+
+    이름에 tiny 가 들어 있어서 골라지는데, 대사를 한 줄도 못 알아듣고 오류도
+    안 난다. 자막 없는 영상이 조용히 완성돼서 원인을 찾기가 아주 어렵다.
+    """
+    from gameedit import transcribe as tr
+
+    models = tmp_path / "models"
+    models.mkdir()
+    fake = models / "for-tests-ggml-tiny.bin"
+    fake.write_bytes(b"\x00" * 1024)                       # 1KB 짜리 껍데기
+    real = models / "ggml-base.bin"
+    real.write_bytes(b"\x00" * (60 * 1024 * 1024))         # 60MB
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(models),))
+
+    # 폰 프로필은 'tiny' 를 원한다. 그래도 껍데기를 고르면 안 된다.
+    assert tr.find_whisper_model(size="tiny") == str(real)
+    assert tr.find_whisper_model() == str(real)
+
+
+def test_undersized_models_are_ignored(tmp_path, monkeypatch):
+    """이름이 멀쩡해도 크기가 말이 안 되면 진짜 모델이 아니다."""
+    from gameedit import transcribe as tr
+
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "ggml-tiny.bin").write_bytes(b"\x00" * 2048)
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(models),))
+    assert tr.find_whisper_model(size="tiny") is None
+
+
+def test_explicitly_configured_model_is_trusted(tmp_path, monkeypatch):
+    """직접 경로를 적었으면 그대로 쓴다. 사용자가 알고 넣은 것이다."""
+    from gameedit import transcribe as tr
+
+    chosen = tmp_path / "for-tests-ggml-tiny.bin"
+    chosen.write_bytes(b"\x00" * 10)
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", ())
+    assert tr.find_whisper_model(str(chosen)) == str(chosen)
+
+
+def test_real_model_check(tmp_path):
+    from gameedit.transcribe import is_real_model
+
+    big = tmp_path / "ggml-small.bin"
+    big.write_bytes(b"\x00" * (60 * 1024 * 1024))
+    assert is_real_model(big)
+    assert not is_real_model(tmp_path / "없는파일.bin")

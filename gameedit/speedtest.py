@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import re
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -26,6 +25,7 @@ from pathlib import Path
 from typing import Callable
 
 from .media import extract_audio, probe
+from .system import available_memory_mb
 from .transcribe import find_whisper_model, resolve_backend, transcribe
 
 Logger = Callable[[str], None]
@@ -131,22 +131,6 @@ def human_time(seconds: float) -> str:
 
 
 # ---------------------------------------------------------------- 메모리
-
-def available_memory_mb() -> float:
-    """지금 실제로 더 쓸 수 있는 램(MB). 못 알아내면 0.
-
-    `MemTotal` 이 아니라 `MemAvailable` 을 본다. 안드로이드는 총 4GB 라도
-    시스템과 다른 앱이 이미 절반 넘게 쓰고 있어서, 총량으로 판단하면 죽는다.
-    """
-    try:
-        text = Path("/proc/meminfo").read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return 0.0
-    m = re.search(r"^MemAvailable:\s+(\d+)\s*kB", text, re.MULTILINE)
-    if not m:
-        return 0.0
-    return int(m.group(1)) / 1024.0
-
 
 def model_memory_mb(model_name: str, model_path: str | None = None) -> float:
     """모델을 올리는 데 필요한 램(MB).

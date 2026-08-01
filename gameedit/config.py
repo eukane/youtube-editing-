@@ -256,6 +256,9 @@ PROFILES: dict[str, dict] = {
             # 폰에서는 '느린 것'보다 '기기가 죽는 것'이 훨씬 나쁘다.
             # 메모리를 우선해서 더 잘게 나눈다.
             "segment_batch": 6,
+            # 남은 메모리가 바닥이면(다른 앱이 잡아먹은 경우)
+            # 해상도 계산과 상관없이 한 클립씩 뽑는다
+            "memory_guard": True,
         },
         "highlight": {"max_clips": 25},
     },

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from .media import FFmpegError, ffmpeg_bin, run
+from .system import available_memory_mb
 from .models import EditPlan, MemeCue
 
 Logger = Callable[[str], None]
@@ -457,6 +458,41 @@ def build_batch_command(plan: EditPlan, clips: list, cfg: dict, output: Path, *,
     return [*cmd[:at], *seek, *cmd[at:]]
 
 
+# segment_batch 를 정한 기준 해상도. 720p 에서 6개씩 묶었을 때 약 200MB 였다.
+BATCH_REFERENCE_PIXELS = 1280 * 720
+# 작은 영상이라고 무한정 키우면 다른 데서 터진다
+BATCH_MAX_FACTOR = 4
+# 이보다 적게 남았으면 해상도와 상관없이 한 클립씩. 편집 화면을 띄워 둔
+# 크롬이 같은 기기에서 수백 MB 를 쓰고 있는 상황이 실제로 있었다.
+LOW_MEMORY_MB = 700.0
+
+
+def resolve_batch(render_cfg: dict, src_width: int = 0, src_height: int = 0, *,
+                  free_mb: float | None = None) -> int:
+    """한 조각에 몇 클립을 넣을지. **원본 해상도에 따라 달라진다.**
+
+    메모리는 `한 조각의 클립 수 × 원본 프레임 크기` 에 비례한다. trim 필터가
+    클립마다 하나씩 붙고, 크기를 줄이는 scale 은 그 뒤에 오기 때문에 버퍼는
+    전부 **원본 해상도**로 쌓인다.
+
+    그래서 클립 수만 고정해 두면 해상도가 올라갈 때 그대로 터진다. 실제로
+    2000x1200 짜리 태블릿 녹화(720p 의 2.6배)에서 6개씩 묶었다가 컷 편집
+    도중에 안드로이드가 앱을 죽였다. 픽셀 수 기준으로 환산해서 잡는다.
+    """
+    batch = max(1, int(render_cfg.get("segment_batch", 8) or 1))
+    pixels = int(src_width or 0) * int(src_height or 0)
+    if pixels > 0:
+        scaled = batch * BATCH_REFERENCE_PIXELS / pixels
+        batch = max(1, min(batch * BATCH_MAX_FACTOR, int(scaled)))
+
+    # 마지막 안전장치. 계산이 맞아도 그 순간 기기에 여유가 없으면 죽는다.
+    if render_cfg.get("memory_guard", True):
+        free = available_memory_mb() if free_mb is None else free_mb
+        if 0 < free < LOW_MEMORY_MB:
+            return 1
+    return batch
+
+
 def build_render_job(plan: EditPlan, config, ass_path: Path | None, output: Path,
                      work_dir: Path) -> RenderJob:
     render_cfg = config.section("render")
@@ -469,7 +505,7 @@ def build_render_job(plan: EditPlan, config, ass_path: Path | None, output: Path
     # 클립이 많으면 조각을 하나씩 뽑는다. 한 번에 붙이면 클립 수에 비례해
     # 메모리가 늘어나서 폰·태블릿이 멈춘다 (build_segment_command 주석 참고).
     threshold = int(render_cfg.get("segment_threshold", 8) or 0)
-    batch = max(1, int(render_cfg.get("segment_batch", 8) or 1))
+    batch = resolve_batch(render_cfg, plan.media.width, plan.media.height)
     if threshold and len(plan.clips) >= threshold:
         seg_dir = work_dir / "segments"
         seg_dir.mkdir(parents=True, exist_ok=True)

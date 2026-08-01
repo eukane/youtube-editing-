@@ -320,7 +320,8 @@ def test_subtitle_installer_wires_whisper_cpp(termux):
     git.chmod(0o755)
     models = termux["home"] / "whisper-models"
     models.mkdir()
-    (models / "ggml-base.bin").write_bytes(b"ggml")
+    # 크기까지 흉내 낸다. 껍데기 모델을 거르려고 최소 크기를 보기 때문이다.
+    (models / "ggml-base.bin").write_bytes(b"ggml" + b"\x00" * (40 * 1024 * 1024))
 
     proc = run_script("install-subtitles.sh", termux)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -340,7 +341,8 @@ def test_gameedit_finds_whisper_cpp_in_that_layout(termux, monkeypatch):
     link.chmod(0o755)
     models = termux["home"] / "whisper-models"
     models.mkdir(exist_ok=True)
-    (models / "ggml-base.bin").write_bytes(b"ggml")
+    # 크기까지 흉내 낸다. 껍데기 모델을 거르려고 최소 크기를 보기 때문이다.
+    (models / "ggml-base.bin").write_bytes(b"ggml" + b"\x00" * (40 * 1024 * 1024))
 
     monkeypatch.setenv("PATH", termux["env"]["PATH"])
     monkeypatch.setenv("GAMEEDIT_WHISPER_CPP", "")

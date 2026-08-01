@@ -53,17 +53,36 @@ def find_whisper_cpp(explicit: str = "") -> str | None:
     return None
 
 
+# whisper.cpp 저장소에는 자기 단위 테스트용 더미 모델(`for-tests-ggml-*.bin`)이
+# 같이 들어 있다. 이름에 tiny/base 가 들어 있어서 골라지지만, 가중치가 없는
+# 껍데기라 **대사를 한 줄도 못 알아듣는다.** 오류도 안 나서 자막 없는 영상이
+# 조용히 완성된다. 이름과 크기 두 가지로 걸러 낸다.
+FAKE_MODEL_MARKERS = ("for-tests", "for_tests", "dummy")
+# 제일 작은 진짜 모델(ggml-tiny)이 약 75MB. 그 절반도 안 되면 진짜가 아니다.
+MIN_MODEL_BYTES = 30 * 1024 * 1024
+
+
+def is_real_model(path: Path) -> bool:
+    name = path.name.lower()
+    if any(mark in name for mark in FAKE_MODEL_MARKERS):
+        return False
+    try:
+        return path.stat().st_size >= MIN_MODEL_BYTES
+    except OSError:
+        return False
+
+
 def find_whisper_model(explicit: str = "", size: str = "") -> str | None:
     """whisper.cpp 용 ggml 모델 파일(.bin) 찾기."""
     for candidate in (explicit, os.environ.get("GAMEEDIT_WHISPER_MODEL", "")):
         if candidate and Path(candidate).expanduser().exists():
-            return str(Path(candidate).expanduser())
+            return str(Path(candidate).expanduser())   # 직접 지정한 건 그대로 믿는다
 
     found: list[Path] = []
     for directory in WHISPER_MODEL_DIRS:
         path = Path(directory).expanduser()
         if path.is_dir():
-            found.extend(sorted(path.glob("*.bin")))
+            found.extend(sorted(p for p in path.glob("*.bin") if is_real_model(p)))
     if not found:
         return None
     if size:  # 설정한 크기(tiny/base/small…)와 이름이 맞는 것 우선
@@ -233,4 +252,11 @@ def _whisper_cpp(audio_path, options: dict, log: Logger) -> Transcript:
 
     transcript.language = options.get("language", "ko")
     log(f"  · 대사 {len(transcript.segments)}줄 인식")
+    if not transcript.segments:
+        # 조용히 넘어가면 자막 없는 영상이 완성된 뒤에야 알게 된다
+        log("  ⚠ 대사를 한 줄도 못 알아들었습니다. 자막 없이 계속합니다.")
+        log(f"     쓴 모델: {Path(model).name} ({Path(model).stat().st_size // 1024 // 1024}MB)")
+        log("     · 영상에 말소리가 없거나")
+        log("     · 모델이 너무 작거나 (tiny 는 한국어를 자주 놓칩니다)")
+        log("     · 다시 받아야 하는 경우입니다:  bash install-subtitles.sh base")
     return transcript

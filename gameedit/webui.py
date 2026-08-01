@@ -210,7 +210,12 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
       <div class="muted" id="speed-out" style="margin-top:10px;display:none"></div>
     </div>
 
-    <div class="muted">편집이 시작되면 폰을 꺼도 됩니다. 컴퓨터가 알아서 만듭니다.</div>
+    <div class="muted">
+      편집이 시작되면 <b>이 화면(크롬)을 닫아도 계속 만듭니다.</b>
+      Termux 만 켜 두면 됩니다.<br>
+      기기가 자꾸 죽는다면 시작한 뒤 크롬을 닫아 두세요 — 이 화면이
+      메모리를 수백 MB 씁니다.
+    </div>
   </section>
 
   <!-- ============ 작업 상세 ============ -->

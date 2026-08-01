@@ -388,3 +388,85 @@ def test_batch_seek_does_not_shift_the_trim_times(tmp_path):
     remainder = len(plan.clips) % batch or batch
     expected = plan.clips[-remainder].source_start
     assert f"trim=start={expected:.3f}" in graph, graph[:200]
+
+
+# --------------------------------------------- 해상도에 따른 조각 크기
+
+def test_batch_shrinks_for_high_resolution_sources():
+    """메모리는 `조각당 클립 수 × 원본 프레임 크기` 에 비례한다.
+
+    클립 수만 고정해 두면 해상도가 올라갈 때 그대로 터진다. 실제로
+    2000x1200 태블릿 녹화에서 6개씩 묶었다가 컷 편집 도중에 죽었다.
+    """
+    from gameedit.render import resolve_batch
+
+    cfg = {"segment_batch": 6}
+    assert resolve_batch(cfg, 1280, 720) == 6          # 기준 해상도는 그대로
+    assert resolve_batch(cfg, 2000, 1200) == 2         # 죽었던 그 해상도
+    assert resolve_batch(cfg, 1920, 1080) == 2
+    assert resolve_batch(cfg, 3840, 2160) == 1         # 4K 도 최소 1개는 나온다
+
+
+def test_batch_grows_for_small_sources_but_is_capped():
+    from gameedit.render import BATCH_MAX_FACTOR, resolve_batch
+
+    cfg = {"segment_batch": 6}
+    assert resolve_batch(cfg, 640, 360) == 6 * BATCH_MAX_FACTOR
+    assert resolve_batch(cfg, 854, 480) > 6
+
+
+def test_unknown_source_size_keeps_the_configured_batch():
+    from gameedit.render import resolve_batch
+
+    assert resolve_batch({"segment_batch": 6}, 0, 0) == 6
+    assert resolve_batch({"segment_batch": 6}) == 6
+
+
+def test_high_resolution_plan_is_split_into_more_pieces(tmp_path):
+    """설정이 아니라 실제 렌더 계획에 반영되는지."""
+    from gameedit.config import Config
+    from gameedit.models import Clip, EditPlan, MediaInfo
+    from gameedit.render import build_render_job
+
+    def make(width, height):
+        plan = EditPlan(source="/tmp/a.mp4",
+                        media=MediaInfo(path="/tmp/a.mp4", duration=600.0,
+                                        width=width, height=height, fps=30.0))
+        plan.clips = [Clip(source_start=i * 10.0, source_end=i * 10.0 + 5.0)
+                      for i in range(12)]
+        plan.relayout()
+        return build_render_job(plan, Config().with_profile("phone"), None,
+                                tmp_path / "out.mp4", tmp_path / f"w{width}")
+
+    small = make(1280, 720)
+    big = make(2000, 1200)
+    assert len(big.segment_cmds) > len(small.segment_cmds)
+    assert len(big.segment_cmds) == 6      # 클립 12개를 2개씩
+
+
+def test_low_free_memory_forces_one_clip_at_a_time():
+    """계산이 맞아도 그 순간 기기에 여유가 없으면 죽는다.
+
+    편집 화면을 띄워 둔 크롬이 같은 기기에서 수백 MB 를 쓰고 있는 상황이
+    실제로 있었다. 마지막 안전장치.
+    """
+    from gameedit.render import resolve_batch
+
+    cfg = {"segment_batch": 6}
+    assert resolve_batch(cfg, 1280, 720, free_mb=3000) == 6
+    assert resolve_batch(cfg, 1280, 720, free_mb=400) == 1
+    assert resolve_batch(cfg, 640, 360, free_mb=400) == 1
+
+
+def test_memory_guard_can_be_turned_off():
+    from gameedit.render import resolve_batch
+
+    cfg = {"segment_batch": 6, "memory_guard": False}
+    assert resolve_batch(cfg, 1280, 720, free_mb=400) == 6
+
+
+def test_unknown_free_memory_does_not_shrink_anything():
+    """/proc/meminfo 가 없는 환경(맥·윈도우)에서 1개씩으로 떨어지면 안 된다."""
+    from gameedit.render import resolve_batch
+
+    assert resolve_batch({"segment_batch": 6}, 1280, 720, free_mb=0.0) == 6
