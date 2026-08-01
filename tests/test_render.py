@@ -354,3 +354,37 @@ def test_phone_profile_prefers_memory_over_speed():
     phone = Config(profile="phone").section("render")
     plain = Config().section("render")
     assert phone["segment_batch"] < plain["segment_batch"]
+
+
+def test_batches_seek_instead_of_decoding_from_the_start(tmp_path):
+    """묶음마다 원본을 처음부터 디코딩하면 뒤쪽 묶음일수록 헛일이 커진다."""
+    from gameedit.config import Config
+    from gameedit.render import build_render_job
+
+    job = build_render_job(_plan_with(40), Config(profile="phone"), None,
+                           tmp_path / "out.mp4", tmp_path)
+    last = job.segment_cmds[-1]
+    at = last.index("-i")
+    head = last[:at]
+    assert "-ss" in head, "마지막 묶음도 앞부분부터 읽고 있다"
+    # -copyts 없이 -ss 만 쓰면 타임스탬프가 0 부터 시작해서 trim 값이 어긋난다
+    assert "-copyts" in head
+    seek_at = float(head[head.index("-ss") + 1])
+    assert seek_at > 100, f"마지막 묶음인데 {seek_at}초부터 읽는다"
+
+
+def test_batch_seek_does_not_shift_the_trim_times(tmp_path):
+    """-copyts 를 쓰므로 클립 시각은 원본 그대로여야 한다."""
+    from gameedit.config import Config
+    from gameedit.render import build_render_job
+
+    plan = _plan_with(40)
+    job = build_render_job(plan, Config(profile="phone"), None,
+                           tmp_path / "out.mp4", tmp_path)
+    last = job.segment_cmds[-1]
+    graph = last[last.index("-filter_complex") + 1]
+    # 마지막 묶음에 남은 클립 수만큼 뒤에서 세어 첫 클립을 찾는다
+    batch = Config(profile="phone").section("render")["segment_batch"]
+    remainder = len(plan.clips) % batch or batch
+    expected = plan.clips[-remainder].source_start
+    assert f"trim=start={expected:.3f}" in graph, graph[:200]

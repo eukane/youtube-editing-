@@ -434,11 +434,27 @@ def build_batch_command(plan: EditPlan, clips: list, cfg: dict, output: Path, *,
     한 번에 전부 붙이면 클립 수에 비례해 메모리가 늘고(실측 120개 451MB),
     하나씩 따로 뽑으면 메모리는 일정하지만(77MB) ffmpeg 를 클립 수만큼
     띄우느라 느려진다(22.9초 → 31.1초). 묶어서 뽑으면 둘 다 피할 수 있다.
+
+    그리고 묶음이 필요로 하는 구간만 읽는다. `-ss` 없이 trim 만 쓰면 묶음마다
+    원본을 처음부터 디코딩해서, 뒤쪽 묶음일수록 헛일이 커진다. 4K 원본이면
+    이 헛일이 전체 시간을 지배한다.
     """
+    offset = min(c.source_start for c in clips)
+    end = max(c.source_end for c in clips)
+
     piece = EditPlan(source=plan.source, media=plan.media)
     piece.clips = list(clips)
     piece.relayout()
-    return build_cut_command(piece, cfg, output, width=width, height=height, fps=fps)
+    cmd = build_cut_command(piece, cfg, output, width=width, height=height, fps=fps)
+
+    # `-ss` 만 쓰면 타임스탬프가 0 부터 다시 시작해서 trim 값을 전부 빼 줘야
+    # 하는데, 그 계산이 프레임 단위로 어긋난다(실측에서 20개 중 1개가 다른
+    # 프레임으로 나왔다). `-copyts` 로 원본 시각을 그대로 들고 오면 trim 값을
+    # 손댈 필요가 없어서 통짜로 뽑을 때와 결과가 같아진다.
+    at = cmd.index("-i")
+    seek = ["-ss", f"{max(0.0, offset - 0.5):.3f}", "-copyts",
+            "-to", f"{end + 0.5:.3f}"]
+    return [*cmd[:at], *seek, *cmd[at:]]
 
 
 def build_render_job(plan: EditPlan, config, ass_path: Path | None, output: Path,
