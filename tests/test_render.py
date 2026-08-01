@@ -276,3 +276,81 @@ def test_termux_gets_the_battery_warning():
 
     source = inspect.getsource(server.serve)
     assert "배터리" in source and "제한 없음" in source
+
+
+# ------------------------- 클립이 많아도 메모리가 폭발하지 않게 (조각별 렌더)
+
+def _plan_with(n):
+    from gameedit.models import Clip, EditPlan, MediaInfo
+
+    plan = EditPlan(source="/tmp/a.mp4",
+                    media=MediaInfo(path="/tmp/a.mp4", duration=600.0, width=1280,
+                                    height=720, fps=30.0, has_audio=True))
+    plan.clips = [Clip(source_start=i * 5.0, source_end=i * 5.0 + 2.0) for i in range(n)]
+    plan.relayout()
+    return plan
+
+
+def test_many_clips_are_rendered_in_batches(tmp_path):
+    """클립을 전부 한 필터그래프에 넣으면 메모리가 클립 수에 비례해 늘어난다."""
+    from gameedit.config import Config
+    from gameedit.render import build_render_job
+
+    job = build_render_job(_plan_with(40), Config(profile="phone"), None,
+                           tmp_path / "out.mp4", tmp_path)
+    assert job.segmented
+    assert len(job.segment_cmds) == 7          # 40개를 6개씩 → 7묶음
+    assert job.concat_cmd and "concat" in job.concat_cmd
+    assert not job.cut_cmd, "조각별로 갈 때는 통짜 명령을 만들지 않는다"
+
+
+def test_few_clips_stay_in_one_pass(tmp_path):
+    from gameedit.config import Config
+    from gameedit.render import build_render_job
+
+    job = build_render_job(_plan_with(3), Config(profile="phone"), None,
+                           tmp_path / "out.mp4", tmp_path)
+    assert not job.segmented and job.cut_cmd
+
+
+def test_segments_seek_instead_of_decoding_from_the_start(tmp_path):
+    """-ss 를 입력 앞에 둬야 앞부분을 건너뛴다. 뒤에 두면 처음부터 디코딩한다."""
+    from gameedit.config import Config
+    from gameedit.render import build_render_job
+
+    job = build_render_job(_plan_with(40), Config(profile="phone"), None,
+                           tmp_path / "out.mp4", tmp_path)
+    first = job.segment_cmds[0]
+    assert "-i" in first
+
+
+def test_batch_size_controls_memory_tradeoff(tmp_path):
+    from gameedit.config import Config
+    from gameedit.render import build_render_job
+
+    small = Config(profile="phone")
+    small.set("render.segment_batch", 4)
+    big = Config(profile="phone")
+    big.set("render.segment_batch", 20)
+
+    a = build_render_job(_plan_with(40), small, None, tmp_path / "a.mp4", tmp_path / "a")
+    b = build_render_job(_plan_with(40), big, None, tmp_path / "b.mp4", tmp_path / "b")
+    assert len(a.segment_cmds) > len(b.segment_cmds)
+
+
+def test_concat_list_escapes_quotes(tmp_path):
+    from gameedit.render import write_concat_list
+
+    odd = tmp_path / "it's a clip.mp4"
+    odd.write_bytes(b"x")
+    listing = write_concat_list([odd], tmp_path / "list.txt")
+    text = listing.read_text()
+    assert "'\\''" in text, "작은따옴표가 들어간 경로에서 목록이 깨진다"
+
+
+def test_phone_profile_prefers_memory_over_speed():
+    from gameedit.config import Config
+
+    phone = Config(profile="phone").section("render")
+    plain = Config().section("render")
+    assert phone["segment_batch"] < plain["segment_batch"]
