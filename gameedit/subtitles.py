@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .animation import entrance, resolve_level
 from .fonts import resolve_font
 from .models import Analysis, EditPlan, MemeCue, SubtitleCue, Segment
 
@@ -384,7 +385,7 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     margin_v = int(cfg.get("margin_v", 70))
     emphasis_color = cfg.get("emphasis_color", "&H0033E8FF")
     align = _ALIGN.get(cfg.get("position", "bottom"), 2)
-    pop = bool(cfg.get("pop_animation", True))
+    anim_level = resolve_level(cfg)
     impact_scale = float(cfg.get("impact_scale", 2.7))
     impact_margin_v = int(cfg.get("impact_margin_v", 0) or 0)
     word_color = cfg.get("word_color", emphasis_color)
@@ -482,21 +483,13 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
                        f"Dialogue: 6,{_ass_time(0.15)},{_ass_time(card_end)},TitleName,"
                        f"card,0,0,0,,{{\\fad(150,200)}}{escape_ass(title)}"))
 
-    fade_main = "{\\fad(80,80)}" if pop else ""
-    fade_emph = ("{\\fad(60,60)\\t(0,120,\\fscx115\\fscy115)\\t(120,260,\\fscx100\\fscy100)}"
-                 if pop else "")
-    fade_impact = ("{\\fad(50,120)\\t(0,110,\\fscx125\\fscy125)\\t(110,240,\\fscx100\\fscy100)}"
-                   if pop else "{\\fad(50,120)}")
     impact_seen = 0
     for i, cue in enumerate(cues):
         if cue.end <= cue.start:
             continue
-        if cue.style == "Impact":
-            tag = fade_impact
-        elif cue.style == "Emph":
-            tag = fade_emph
-        else:
-            tag = fade_main
+        # 효과 시간은 자막 길이에 맞춰 줄인다. 0.3초짜리 자막에 0.29초짜리
+        # 등장 효과를 넣으면 제 크기가 되기도 전에 사라진다.
+        tag = entrance(cue.style, cue.end - cue.start, anim_level)
         text = escape_ass("\n".join(cue.lines))
         if cue.style == "Impact":
             # 줄마다 색을 바꿔 쓴다. 같은 색이 계속 나오면 금방 질린다.
@@ -511,7 +504,8 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
                 events.append((cue.start,
                                f"Dialogue: 0,{_ass_time(cue.start)},{_ass_time(cue.end)},"
                                f"Prev,{prev.speaker},0,0,0,,"
-                               f"{fade_main}{escape_ass(' '.join(prev.lines))}"))
+                               f"{entrance('Prev', cue.end - cue.start, anim_level)}"
+                               f"{escape_ass(' '.join(prev.lines))}"))
         else:
             # 초대형 자막은 그 자체로 눈에 띄니 단어 색을 또 바꾸지 않는다
             text = colorize_words(text, word_list, word_color, limit=per_line)
@@ -519,20 +513,13 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
                        f"Dialogue: 0,{_ass_time(cue.start)},{_ass_time(cue.end)},{cue.style},"
                        f"{cue.speaker},0,0,0,,{tag}{text}"))
 
-    pop_meme = ("{\\fad(60,180)\\t(0,140,\\fscx120\\fscy120)\\t(140,280,\\fscx100\\fscy100)}"
-                if pop else "{\\fad(60,180)}")
     for cue in meme_cues:
         if not cue.text or not getattr(cue, "show_text", cue.kind == "text"):
             continue
         style = (cue.style if cue.style in ("MemeTop", "MemeCenter", "Card", "Label",
                                             "Main", "Emph", "Impact", "Narr")
                  else "MemeTop")
-        if style == "Label":
-            tag = "{\\fad(120,200)}"
-        elif style == "Card":
-            tag = "{\\fad(180,250)}"
-        else:
-            tag = pop_meme
+        tag = entrance(style, cue.duration, anim_level)
         text = escape_ass(cue.text)
         events.append((cue.start,
                        f"Dialogue: 1,{_ass_time(cue.start)},{_ass_time(cue.end)},{style},"

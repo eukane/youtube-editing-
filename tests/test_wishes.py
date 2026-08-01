@@ -133,3 +133,23 @@ def test_long_input_is_capped_but_still_parsed():
     got = parse("3분으로 " + "그리고 아무말 " * 50)
     assert got.settings["highlight.target_duration"] == 180
     assert len(got.ignored) <= 6, "못 알아들은 걸 끝없이 나열하면 화면이 넘친다"
+
+
+# ---------------------------------------------------------- 자막 효과
+
+def test_turning_subtitle_effects_off():
+    got = parse("자막 효과 빼줘")
+    assert got.settings["subtitles.animation"] == "off"
+    assert got.ignored == []
+
+
+def test_asking_for_lighter_effects():
+    """렌더가 느릴 때 쓸 수 있어야 한다. 폰에서 설정 파일은 못 고친다."""
+    got = parse("효과 줄여줘")
+    assert got.settings["subtitles.animation"] == "light"
+
+
+def test_effect_request_does_not_swallow_the_zoom_rule():
+    got = parse("줌 빼줘")
+    assert got.settings["editing.zoom"] is False
+    assert "subtitles.animation" not in got.settings

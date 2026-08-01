@@ -100,7 +100,10 @@ DEFAULTS: dict[str, Any] = {
         "emphasis": True,
         "emphasis_threshold": 0.72,
         "emphasis_color": "&H0033E8FF",  # 노랑 (ASS 는 BGR)
-        "pop_animation": True,
+        # 자막이 뜨는 방식. off(효과 없음) / light(페이드만) / full(스타일마다 다르게)
+        # 렌더가 너무 느리면 light 로 낮추면 된다. 결과물이 밋밋해지는 대신 빨라진다.
+        "animation": "full",
+        "pop_animation": True,      # 예전 설정. animation 이 없을 때만 본다
         "export_srt": True,
         # 제일 센 짧은 대사는 화면을 채우는 초대형 자막으로 (실제 편집본의 그 자막)
         "impact": True,
