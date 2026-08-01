@@ -24,14 +24,43 @@ from .models import Analysis, EditPlan, SubtitleCue
 
 BUILTIN_DIR = Path(__file__).resolve().parent.parent / "assets" / "glossary"
 
+# 파일만 넣으면 되는 자리. 게임마다 용어가 다르니 사용자가 직접 채울 수 있어야 한다.
+DEFAULT_DIRS = (
+    "~/storage/shared/gameedit-terms",           # 안드로이드: 내 파일 → gameedit-terms
+    "~/storage/shared/Download/gameedit-terms",
+    "~/gameedit/terms",
+    "./terms",
+)
+
+
+def user_glossary_files() -> list[Path]:
+    """사용자가 폴더에 넣어 둔 사전들."""
+    found: list[Path] = []
+    for raw in DEFAULT_DIRS:
+        folder = Path(raw).expanduser()
+        if folder.is_dir():
+            found.extend(sorted(folder.glob("*.json")))
+    return found
+
 
 def load_glossary(paths=None) -> dict[str, str]:
-    """사전 파일들을 합쳐서 {용어: 설명} 하나로."""
+    """사전 파일들을 합쳐서 {용어: 설명} 하나로.
+
+    paths 를 비워 두면 **들어 있는 사전 전부 + 사용자 폴더 전부**를 읽는다.
+    포켓몬만 하는 게 아니니 특정 파일을 지정하게 만들면 안 된다.
+    """
     out: dict[str, str] = {}
     candidates: list[Path] = []
-    for raw in _as_list(paths):
+    wanted = _as_list(paths)
+    if not wanted:
+        candidates.extend(sorted(BUILTIN_DIR.glob("*.json")) if BUILTIN_DIR.is_dir() else [])
+        candidates.extend(user_glossary_files())
+    for raw in wanted:
         p = Path(raw).expanduser()
         candidates.append(p if p.exists() else BUILTIN_DIR / raw)
+    # 사용자가 직접 지정했더라도 본인 폴더의 사전은 항상 같이 읽는다
+    if wanted:
+        candidates.extend(user_glossary_files())
     for path in candidates:
         if path.is_dir():
             candidates.extend(sorted(path.glob("*.json")))

@@ -42,9 +42,14 @@ def test_builtin_pokemon_dictionary_exists():
     assert gloss["피카츄"] == "전기"
 
 
-def test_missing_file_is_not_fatal():
-    assert load_glossary(["없는파일.json"]) == {}
-    assert load_glossary([]) == {}
+def test_missing_file_is_not_fatal(monkeypatch):
+    """이름을 잘못 적어도 편집이 멈추면 안 된다 (기본 사전은 그대로 쓴다)."""
+    from gameedit import glossary as G
+
+    monkeypatch.setattr(G, "DEFAULT_DIRS", ())
+    gloss = G.load_glossary(["없는파일.json"])
+    assert "로토무" not in gloss          # 지정한 파일이 없으니 그것만 빠진다
+    assert isinstance(gloss, dict)
 
 
 def test_broken_file_is_skipped(tmp_path):
@@ -131,3 +136,46 @@ def test_plan_includes_glossary_when_enabled():
     built = build_plan(analysis, config)
     assert built.meta["glossary_terms"] >= 1
     assert any(c.speaker == "glossary" for c in built.subtitles)
+
+
+# --------------------------------- 포켓몬 전용이 아니어야 한다 (게임마다 다름)
+
+def test_no_files_specified_loads_everything(monkeypatch, tmp_path):
+    """사전을 지정 안 하면 가지고 있는 것 전부를 쓴다."""
+    from gameedit import glossary as G
+
+    mine = tmp_path / "내용어.json"
+    mine.write_text(json.dumps({"우리길드": "3년째 같이 하는 사람들"},
+                               ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(G, "DEFAULT_DIRS", (str(tmp_path),))
+
+    gloss = G.load_glossary([])
+    assert gloss["우리길드"] == "3년째 같이 하는 사람들"    # 내 사전
+    assert "로토무" in gloss                              # 기본 사전도 같이
+
+
+def test_user_dictionary_is_read_even_when_a_file_is_named(monkeypatch, tmp_path):
+    from gameedit import glossary as G
+
+    mine = tmp_path / "내용어.json"
+    mine.write_text(json.dumps({"빨콩": "빨간 포션"}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(G, "DEFAULT_DIRS", (str(tmp_path),))
+
+    gloss = G.load_glossary(["pokemon.json"])
+    assert "빨콩" in gloss and "로토무" in gloss
+
+
+def test_wish_does_not_hardcode_pokemon():
+    from gameedit.wishes import parse
+
+    got = parse("용어 설명 넣어줘")
+    assert got.settings["glossary.enabled"] is True
+    assert got.settings["glossary.files"] == [], "특정 게임 파일을 박으면 안 된다"
+
+
+def test_installer_prepares_a_terms_folder(tmp_path):
+    from pathlib import Path as P
+
+    text = P("install.sh").read_text(encoding="utf-8")
+    assert "gameedit-terms" in text
+    assert "용어-넣는-법.txt" in text

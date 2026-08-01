@@ -93,7 +93,14 @@ def test_focus_keywords(text, expect):
 def test_glossary_request_turns_on_the_dictionary():
     got = parse("포켓몬 타입 알려줘")
     assert got.settings["glossary.enabled"] is True
-    assert got.settings["glossary.files"] == ["pokemon.json"]
+    # 특정 게임 파일을 박으면 다른 게임에서는 쓸 수 없다. 가진 사전을 전부 쓴다.
+    assert got.settings["glossary.files"] == []
+
+
+def test_glossary_request_works_without_saying_pokemon():
+    """포켓몬만 하는 게 아니다."""
+    for text in ("용어 설명 넣어줘", "이름 나오면 정보 알려줘", "정보 표시해줘"):
+        assert parse(text).settings.get("glossary.enabled") is True, text
 
 
 # --------------------------------------------------------- 설정에 반영

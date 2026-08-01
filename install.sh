@@ -149,6 +149,34 @@ if [ -d "$MEME_DIR" ] && [ ! -f "$MEME_DIR/밈-넣는-법.txt" ]; then
 GUIDE
 fi
 
+# 게임마다 용어가 다르다. 사용자가 직접 채울 수 있는 자리를 만들어 둔다.
+TERM_DIR="$HOME/storage/shared/gameedit-terms"
+[ -d "$HOME/storage/shared" ] && mkdir -p "$TERM_DIR" 2>/dev/null || true
+[ -d "$TERM_DIR" ] || TERM_DIR="$HOME/gameedit/terms"
+mkdir -p "$TERM_DIR" 2>/dev/null || true
+if [ -d "$TERM_DIR" ] && [ ! -f "$TERM_DIR/용어-넣는-법.txt" ]; then
+    cat > "$TERM_DIR/용어-넣는-법.txt" <<'GUIDE'
+여기에 .json 파일을 넣으면 편집할 때 자동으로 씁니다.
+대사에 그 말이 나오면 화면 위쪽에 작게 설명이 뜹니다.
+
+파일 예 (내용어.json) — 메모장으로 만들면 됩니다.
+
+{
+  "우리 길드": "3년째 같이 하는 사람들",
+  "그 무기": "3만원 주고 산 것",
+  "빨콩": "빨간 포션",
+  "보스방": "3층 안쪽"
+}
+
+  · 파일 이름은 아무거나 (.json 으로 끝나기만 하면 됩니다)
+  · 여러 개 넣어도 됩니다. 게임별로 나눠 두면 편합니다
+  · 두 글자 이상만 인식합니다 (한 글자는 아무 데나 걸립니다)
+  · 포켓몬 1023마리는 이미 들어 있습니다
+
+⚠ 편집 중에는 인터넷을 쓰지 않습니다. 여기 있는 파일만 읽습니다.
+GUIDE
+fi
+
 echo "[5/5] 실행 명령 등록"
 BIN="$PREFIX/bin/편집기"
 # 잠금 해제 명령은 termux-wake-unlock 이다. wake-lock 쪽에 해제 옵션을 붙여

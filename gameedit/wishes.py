@@ -63,9 +63,9 @@ RULES: list[tuple[str, str, dict]] = [
     (r"(?:효과음|사운드)\s*(?:을|를)?\s*(?:매|모든|전부|많이)", "컷마다 효과음",
      {"memes.transition_sfx_every": 1}),
     # 용어 설명 자막 (미리 받아 둔 사전에서 읽는다)
-    (r"(?:포켓몬|타입|용어|이름)\s*(?:을|를)?\s*(?:설명|알려|표시|띄워|넣)",
-     "이름 나오면 설명 자막 (포켓몬 타입 등)",
-     {"glossary.enabled": True, "glossary.files": ["pokemon.json"]}),
+    (r"(?:포켓몬|타입|용어|이름|정보)\s*(?:을|를)?\s*(?:설명|알려|표시|띄워|넣)",
+     "이름 나오면 설명 자막 (가지고 있는 사전 전부 사용)",
+     {"glossary.enabled": True, "glossary.files": []}),
     # 화질
     (r"(?:화질|고화질)\s*(?:을|를)?\s*(?:좋게|높|올)", "화질 우선 (느려짐)",
      {"render.crf": 20, "render.preset": "medium"}),
