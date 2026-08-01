@@ -184,6 +184,7 @@ class JobManager:
         self.order: list[str] = []
         self.lock = threading.Lock()
         self.worker_lock = threading.Lock()
+        self.speed: dict = {"running": False, "done": False, "source": "", "report": None}
         (self.root / "uploads").mkdir(parents=True, exist_ok=True)
         (self.root / "jobs").mkdir(parents=True, exist_ok=True)
 
@@ -247,6 +248,43 @@ class JobManager:
             self.order.append(job_id)
         threading.Thread(target=self._run, args=(job,), daemon=True).start()
         return job
+
+    # -- 속도 재보기 -------------------------------------------------------
+    # 30초쯤 걸려서 요청 하나를 붙잡고 있으면 브라우저가 먼저 끊는다.
+    # 따로 돌려 놓고 화면이 물어보게 한다.
+    def start_speedtest(self, source: Path) -> dict:
+        with self.lock:
+            if self.speed.get("running"):
+                return dict(self.speed, report=self._speed_report_dict())
+            self.speed = {"running": True, "done": False, "source": str(source),
+                          "report": None}
+        threading.Thread(target=self._run_speedtest, args=(Path(source),),
+                         daemon=True).start()
+        return self.speed_status()
+
+    def speed_status(self) -> dict:
+        with self.lock:
+            return {"running": bool(self.speed.get("running")),
+                    "done": bool(self.speed.get("done")),
+                    "source": self.speed.get("source", ""),
+                    "name": Path(self.speed.get("source", "")).name,
+                    "report": self._speed_report_dict()}
+
+    def _speed_report_dict(self) -> dict | None:
+        report = self.speed.get("report")
+        return report.as_dict() if report is not None else None
+
+    def _run_speedtest(self, source: Path) -> None:
+        from .speedtest import SpeedReport, measure
+
+        # 편집이 돌고 있으면 그게 CPU를 다 쓰고 있어서 속도가 엉뚱하게 나온다.
+        with self.worker_lock:
+            try:
+                report = measure(source, self.config)
+            except Exception as err:                    # 측정 실패로 서버가 죽으면 안 된다
+                report = SpeedReport(error=f"속도를 재지 못했습니다: {err}")
+        with self.lock:
+            self.speed.update(running=False, done=True, report=report)
 
     def rerender(self, job: Job, plan: EditPlan) -> None:
         """폰에서 클립·자막을 고친 뒤 다시 만들기 (분석은 건너뛴다)."""
@@ -607,6 +645,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/files":
             self._send_json({"files": self._available_files()})
             return
+        if path == "/api/speedtest":
+            self._send_json(self.manager.speed_status())
+            return
 
         m = re.match(r"^/api/jobs/([0-9a-f]+)$", path)
         if m:
@@ -672,6 +713,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/files/delete":
             self._handle_delete_file()
             return
+        if path == "/api/speedtest":
+            self._handle_speedtest()
+            return
         if path == "/api/wishes/check":
             from .wishes import parse as parse_wishes
             data = self._read_json_body()
@@ -713,6 +757,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json({"ok": True, "name": target.name,
                          "freed_mb": round(freed / 1024 / 1024, 1)})
+
+    def _handle_speedtest(self) -> None:
+        """고른 영상으로 이 기기의 자막 속도를 재기 시작한다."""
+        data = self._read_json_body()
+        raw = str(data.get("path") or "")
+        target = Path(raw) if raw else None
+        if target is None or not self._allowed_source(target) or not target.is_file():
+            self._send_json({"error": "잴 영상을 먼저 고르세요"}, 400)
+            return
+        self._send_json(self.manager.start_speedtest(target))
 
     # -- 처리 --------------------------------------------------------------
     def _available_files(self) -> list[dict]:

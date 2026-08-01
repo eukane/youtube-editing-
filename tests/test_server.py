@@ -1,6 +1,7 @@
 """모바일 웹 서버 (gameedit serve)."""
 
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -615,3 +616,87 @@ def test_ui_offers_subtitle_upload():
 
     assert "upload-subs" in PAGE and "pickSubs" in PAGE
     assert ".srt" in PAGE
+
+
+# ----------------------------------------------------------- 속도 재보기
+
+def test_speedtest_rejects_files_outside_allowed_folders(server, tmp_path):
+    """경로를 그대로 믿으면 아무 파일이나 ffmpeg 에 물려 버린다."""
+    outside = tmp_path.parent / "남의영상.mp4"
+    outside.write_bytes(b"\x00" * 100)
+    code, _ = post_json(server[0], "/api/speedtest", {"path": str(outside)})
+    assert code == 400
+
+
+def test_speedtest_rejects_empty_path(server):
+    code, _ = post_json(server[0], "/api/speedtest", {})
+    assert code == 400
+
+
+def test_speedtest_status_before_running(server):
+    got = get_json(f"{server[0]}/api/speedtest")
+    assert got["running"] is False and got["done"] is False and got["report"] is None
+
+
+def test_speedtest_runs_and_reports(server, tmp_path, monkeypatch):
+    """재보기는 따로 돌고, 화면은 물어보면서 기다린다."""
+    from gameedit import speedtest as speed_mod
+
+    video = tmp_path / "uploads" / "테스트.mp4"
+    video.parent.mkdir(parents=True, exist_ok=True)
+    video.write_bytes(b"\x00" * 100)
+
+    def fake_measure(source, config, log=None):
+        return speed_mod.SpeedReport(ok=True, backend="whisper.cpp", model="ggml-base.bin",
+                                     load_seconds=6.0, seconds_per_minute=24.0,
+                                     source_duration=600.0, sample_text="테스트 대사")
+    monkeypatch.setattr(speed_mod, "measure", fake_measure)
+
+    base, manager, _ = server
+    code, _started = post_json(base, "/api/speedtest", {"path": str(video)})
+    assert code == 200
+    for _ in range(50):
+        status = get_json(f"{base}/api/speedtest")
+        if status["done"]:
+            break
+        time.sleep(0.1)
+
+    assert status["done"] is True and status["running"] is False
+    report = status["report"]
+    assert report["ok"] is True
+    assert report["predicted_seconds"] == pytest.approx(246.0)   # 6 + 10분×24초
+    assert report["predicted_hour_seconds"] == pytest.approx(1446.0)
+    assert report["sample_text"] == "테스트 대사"
+
+
+def test_every_button_calls_a_function_that_exists():
+    """화면에서 눌렀는데 아무 일도 안 일어나는 버그를 막는다.
+
+    지웠거나 이름을 바꾼 함수를 onclick 에 그대로 두면, 브라우저는 조용히
+    실패하고 사용자는 '눌러도 안 돼요' 만 알게 된다.
+    """
+    from gameedit.webui import PAGE
+
+    defined = set(re.findall(r"(?:async\s+)?function\s+(\w+)\s*\(", PAGE))
+    called = set(re.findall(r'on\w+="(\w+)\(', PAGE))
+    assert called, "onclick 이 하나도 없다면 정규식이 잘못된 것"
+    assert called <= defined, f"없는 함수를 부르고 있습니다: {sorted(called - defined)}"
+
+
+def test_every_referenced_element_id_exists():
+    """$('없는id') 는 null 을 돌려주고 그 줄에서 화면이 통째로 멈춘다."""
+    from gameedit.webui import PAGE
+
+    ids = set(re.findall(r'id="([\w-]+)"', PAGE))
+    used = set(re.findall(r"\$\('([\w-]+)'\)", PAGE))
+    assert used <= ids, f"HTML 에 없는 id 를 찾고 있습니다: {sorted(used - ids)}"
+
+
+def test_speedtest_button_is_wired_to_the_api():
+    from gameedit.webui import PAGE
+
+    assert "/api/speedtest" in PAGE
+    assert "function runSpeedtest" in PAGE
+    # 다른 영상을 고르면 지난 결과를 지워야 한다. 안 그러면 남의 숫자를 보고 판단한다
+    body = re.search(r"function openOptions\(file\)\{(.*?)\n\}", PAGE, re.S).group(1)
+    assert "resetSpeed()" in body

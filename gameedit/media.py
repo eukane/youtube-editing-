@@ -205,11 +205,19 @@ def _probe_with_ffmpeg(path: str) -> MediaInfo:
 # --------------------------------------------------------------------------
 
 
-def extract_audio(src: str | Path, dst: str | Path, *, sample_rate: int = 16000) -> Path:
-    """분석용 모노 wav 추출."""
+def extract_audio(src: str | Path, dst: str | Path, *, sample_rate: int = 16000,
+                  start: float = 0.0, duration: float = 0.0) -> Path:
+    """분석용 모노 wav 추출.
+
+    start/duration 을 주면 그 구간만 뽑는다. `-ss` 를 입력 앞에 두어야 앞부분을
+    통째로 디코딩하지 않고 건너뛴다 — 긴 영상 가운데를 조금만 볼 때 이게
+    수십 초 차이를 만든다.
+    """
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    ffmpeg(["-i", str(src), "-vn", "-ac", "1", "-ar", str(sample_rate),
+    seek = ["-ss", f"{max(0.0, float(start)):.3f}"] if start > 0 else []
+    limit = ["-t", f"{float(duration):.3f}"] if duration > 0 else []
+    ffmpeg([*seek, "-i", str(src), *limit, "-vn", "-ac", "1", "-ar", str(sample_rate),
             "-acodec", "pcm_s16le", str(dst)])
     return dst
 

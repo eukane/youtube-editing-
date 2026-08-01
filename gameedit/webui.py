@@ -196,6 +196,20 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
         <div class="switch" id="sw-shorts" onclick="toggle(this)"><i></i></div>
       </div>
     </div>
+
+    <h2>얼마나 걸릴까</h2>
+    <div class="card">
+      <div class="row">
+        <div style="flex:1">
+          <div class="label">자막 만드는 시간 재보기</div>
+          <div class="sub" id="speed-sub">짧은 조각을 실제로 돌려서 이 기기 속도를 잽니다 (30초쯤)</div>
+        </div>
+        <div class="chip" id="speed-btn" style="flex:none;min-width:0;padding:10px 14px"
+             onclick="runSpeedtest()">재보기</div>
+      </div>
+      <div class="muted" id="speed-out" style="margin-top:10px;display:none"></div>
+    </div>
+
     <div class="muted">편집이 시작되면 폰을 꺼도 됩니다. 컴퓨터가 알아서 만듭니다.</div>
   </section>
 
@@ -380,6 +394,7 @@ function openOptions(file){
   state.subs = '';
   state.wishes = '';
   if ($('wishes')) $('wishes').value = '';
+  resetSpeed();          // 다른 영상을 골랐는데 지난 결과가 남아 있으면 오해한다
   $('subs-name').textContent = '유튜브 자동자막·클로바노트 등에서 받은 .srt';
   state.style = state.style || '';
   $('styles').innerHTML = STYLES.map(([id,name]) =>
@@ -434,6 +449,70 @@ function checkWishes(){
         || '❓ 알아들은 게 없습니다. 아래 예시처럼 적어 보세요.';
     } catch(e){ /* 서버가 잠깐 안 받아도 입력은 계속 가능해야 한다 */ }
   }, 400);
+}
+
+// ---------------------------------------------------------- 속도 재보기
+// 기기마다 열 배씩 차이나서 추정값은 의미가 없다. 짧은 조각을 실제로 돌린다.
+let speedTimer = null;
+
+function resetSpeed(){
+  clearInterval(speedTimer); speedTimer = null;
+  $('speed-btn').textContent = '재보기';
+  $('speed-out').style.display = 'none';
+  $('speed-out').innerHTML = '';
+}
+
+function fmtWait(sec){
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return sec + '초';
+  const m = Math.round(sec / 60);
+  if (m < 60) return m + '분';
+  const h = Math.floor(m / 60), r = m % 60;
+  return r ? `${h}시간 ${r}분` : `${h}시간`;
+}
+
+function showSpeed(r){
+  const out = $('speed-out');
+  out.style.display = 'block';
+  if (!r.ok){
+    out.innerHTML = `❌ ${esc(r.error || '재지 못했습니다')}`;
+    return;
+  }
+  const rows = [];
+  if (r.predicted_seconds > 0)
+    rows.push(`<b>이 영상: 약 ${fmtWait(r.predicted_seconds)}</b>`);
+  rows.push(`1시간짜리면 약 ${fmtWait(r.predicted_hour_seconds)}`);
+  rows.push(`오디오 1분당 ${Math.round(r.seconds_per_minute)}초 · ${esc(r.model || r.backend)}`);
+  if (r.memory_verdict && r.memory_verdict !== 'ok')
+    rows.push(`⚠ ${esc(r.memory_note)}`);
+  if (r.sample_text)
+    rows.push(`<br>인식된 대사 — 맞는지 직접 보세요<br><i>${esc(r.sample_text)}</i>`);
+  out.innerHTML = rows.join('<br>');
+}
+
+async function runSpeedtest(){
+  if (!state.file) return;
+  if (speedTimer) return;                 // 이미 재는 중
+  $('speed-btn').textContent = '재는 중…';
+  $('speed-out').style.display = 'block';
+  $('speed-out').textContent = '짧은 조각 두 개를 돌려 보는 중… (30초쯤)';
+  try{
+    await api('/api/speedtest', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({path: state.file.path})
+    });
+  } catch(e){
+    resetSpeed(); toast('재보기를 시작하지 못했습니다'); return;
+  }
+  speedTimer = setInterval(async () => {
+    let s;
+    try{ s = await api('/api/speedtest'); } catch(e){ return; }
+    if (s.running) return;
+    clearInterval(speedTimer); speedTimer = null;
+    $('speed-btn').textContent = '다시 재기';
+    if (s.report) showSpeed(s.report);
+    else { $('speed-out').textContent = '결과를 받지 못했습니다.'; }
+  }, 2000);
 }
 
 async function pickSubs(input){

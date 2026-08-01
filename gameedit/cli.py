@@ -235,6 +235,39 @@ def cmd_analyze(args) -> int:
     return 0
 
 
+def cmd_speedtest(args) -> int:
+    """이 기기에서 자막이 얼마나 걸릴지 실제로 재 본다."""
+    from .speedtest import human_time, measure
+
+    config = load_config(args)
+    log("이 기기 속도를 재는 중… (30초쯤 걸립니다)")
+    report = measure(args.video, config, log=log)
+
+    log("")
+    label = report.backend + (f" ({report.model})" if report.model and report.ok else "")
+    log(f"자막 엔진 : {label}")
+    if report.memory_available_mb:
+        log(f"메모리    : 쓸 수 있는 {report.memory_available_mb:.0f}MB / "
+            f"필요한 {report.memory_needed_mb:.0f}MB — {report.memory_note}")
+    if not report.ok:
+        log(f"\n❌ {report.error}")
+        return 1
+
+    log(f"속도      : 오디오 1분당 약 {report.seconds_per_minute:.0f}초"
+        f" (모델 올리는 데 {report.load_seconds:.0f}초)")
+    log("")
+    if report.source_duration:
+        log(f"이 영상({human_time(report.source_duration)}) 자막 : "
+            f"약 {human_time(report.predict(report.source_duration))}")
+    for label, seconds in (("30분", 1800.0), ("1시간", 3600.0), ("2시간", 7200.0)):
+        log(f"  {label} 짜리면 : 약 {human_time(report.predict(seconds))}")
+    if report.sample_text:
+        log("")
+        log("인식된 대사 (정확한지 직접 보세요):")
+        log(f"  {report.sample_text}")
+    return 0
+
+
 def cmd_plan(args) -> int:
     config = load_config(args)
     work_dir = resolve_work_dir(config, args, getattr(args, "video", None))
@@ -589,6 +622,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep-audio", action="store_true", help="추출한 wav 남기기")
     _add_common(p)
     p.set_defaults(func=cmd_analyze)
+
+    p = sub.add_parser("speedtest", help="이 기기에서 자막에 걸릴 시간 재보기")
+    p.add_argument("video")
+    _add_common(p)
+    p.set_defaults(func=cmd_speedtest)
 
     p = sub.add_parser("plan", help="분석 결과로 편집 계획 만들기")
     p.add_argument("video", nargs="?", help="작업 폴더를 찾기 위한 원본 파일명 (선택)")
