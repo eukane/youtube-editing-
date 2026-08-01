@@ -167,6 +167,16 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
         <div class="switch on" id="sw-meme" onclick="toggle(this)"><i></i></div>
       </div>
       <div class="row">
+        <div style="flex:1">
+          <div class="label">만들어 둔 자막 넣기</div>
+          <div class="sub" id="subs-name">유튜브 자동자막·클로바노트 등에서 받은 .srt</div>
+        </div>
+        <input type="file" id="subsfile" accept=".srt,.vtt" style="display:none"
+               onchange="pickSubs(this)">
+        <div class="chip" style="flex:none;min-width:0;padding:10px 14px"
+             onclick="document.getElementById('subsfile').click()">파일</div>
+      </div>
+      <div class="row">
         <div><div class="label">대사 자막</div>
              <div class="sub">음성 인식이 설치돼 있을 때만</div></div>
         <div class="switch on" id="sw-sub" onclick="toggle(this)"><i></i></div>
@@ -358,6 +368,8 @@ function openOptions(file){
   if (!state.lengths.includes(state.target)) state.target = state.lengths[0];
   $('lens').innerHTML = state.lengths.map(n =>
     `<div class="chip ${n===state.target?'on':''}" onclick="setLen(${n})">${n}분</div>`).join('');
+  state.subs = '';
+  $('subs-name').textContent = '유튜브 자동자막·클로바노트 등에서 받은 .srt';
   state.style = state.style || '';
   $('styles').innerHTML = STYLES.map(([id,name]) =>
     `<div class="chip ${id===state.style?'on':''}" onclick="setStyle('${id}')">${name}</div>`).join('');
@@ -393,6 +405,19 @@ async function action(){
   if (state.view === 'edit') return replan();
 }
 
+async function pickSubs(input){
+  const f = input.files[0];
+  if (!f) return;
+  try{
+    const r = await fetch('/api/upload-subs?k=' + encodeURIComponent(state.key||''), {
+      method:'POST', headers:{'X-Filename': encodeURIComponent(f.name)}, body: f
+    }).then(r => r.json());
+    if (r.error) throw new Error(r.error);
+    state.subs = r.path;
+    $('subs-name').textContent = '✅ ' + r.name + ' — 음성 인식을 건너뜁니다';
+  } catch(e){ toast('자막 올리기 실패: ' + e.message); }
+}
+
 async function delFile(i){
   const f = (state.fileList||[])[i];
   if (!f) return;
@@ -421,6 +446,7 @@ async function startJob(){
         shorts: $('sw-shorts').classList.contains('on'),
         pace: state.pace || 'normal',
         style: state.style || '',
+        subs: state.subs || '',
       })
     });
     openJob(job.id);

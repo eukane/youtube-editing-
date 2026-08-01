@@ -4,7 +4,9 @@ import json
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -549,3 +551,67 @@ def test_ui_has_a_delete_button_with_confirmation():
     body = PAGE[PAGE.index("async function delFile"):]
     assert "confirm(" in body, "확인 없이 지우면 안 된다"
     assert "되돌릴 수 없습니다" in body
+
+
+# --------------------- 밖에서 만들어 온 자막 넣기 (폰 음성인식 건너뛰기)
+
+def test_uploaded_subtitles_replace_speech_recognition(server, tmp_path):
+    """폰에서 음성 인식을 돌리는 게 가장 무겁다. 자막이 있으면 건너뛴다."""
+    base, manager, _ = server
+    subs = tmp_path / "subs" / "대사.srt"
+    subs.parent.mkdir(parents=True, exist_ok=True)
+    subs.write_text("1\n00:00:01,000 --> 00:00:03,000\n안녕하세요\n", encoding="utf-8")
+
+    from gameedit.server import Job
+
+    job = Job(id="x", source="/tmp/a.mp4", title="a", options={"subs": str(subs)})
+    config = manager._job_config(job)
+    assert config.get("transcribe.backend") == "external"
+    assert config.get("transcribe.external") == str(subs)
+
+
+def test_no_subtitle_file_leaves_recognition_alone(server):
+    base, manager, _ = server
+    from gameedit.server import Job
+
+    config = manager._job_config(Job(id="x", source="/tmp/a.mp4", title="a", options={}))
+    assert config.get("transcribe.backend") == "auto"
+
+
+def test_subtitle_upload_stores_the_file(server, tmp_path):
+    base, _, _ = server
+    body = b"1\n00:00:01,000 --> 00:00:02,000\n\xed\x95\x9c\xea\xb8\x80\n"
+    req = urllib.request.Request(
+        f"{base}/api/upload-subs", method="POST", data=body,
+        headers={"X-Key": "1234", "X-Filename": urllib.parse.quote("대사.srt")})
+    with urllib.request.urlopen(req, timeout=5) as res:
+        got = json.loads(res.read().decode())
+    saved = Path(got["path"])
+    assert saved.exists() and saved.suffix == ".srt"
+    assert saved.parent.name == "subs"
+
+
+def test_only_subtitle_extensions_are_accepted(server):
+    base, _, _ = server
+    req = urllib.request.Request(
+        f"{base}/api/upload-subs", method="POST", data=b"x",
+        headers={"X-Key": "1234", "X-Filename": "wrong.exe"})
+    with urllib.request.urlopen(req, timeout=5) as res:
+        got = json.loads(res.read().decode())
+    assert Path(got["path"]).suffix == ".srt", "확장자를 안 붙이면 아무 파일이나 들어온다"
+
+
+def test_subtitle_path_outside_the_folder_is_rejected(server, tmp_path):
+    base, _, _ = server
+    outsider = tmp_path / "남의자막.srt"
+    outsider.write_text("1\n", encoding="utf-8")
+    status, body = post_json(base, "/api/jobs",
+                             {"path": "/etc/passwd", "subs": str(outsider)})
+    assert status in (400, 403)
+
+
+def test_ui_offers_subtitle_upload():
+    from gameedit.webui import PAGE
+
+    assert "upload-subs" in PAGE and "pickSubs" in PAGE
+    assert ".srt" in PAGE

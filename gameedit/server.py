@@ -35,6 +35,9 @@ from .subtitles import with_title_card, write_ass
 from .webui import PAGE
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".ts", ".flv"}
+# 다른 데서 만들어 온 자막. 폰에서 음성 인식을 돌리는 게 제일 무거운 작업이라
+# 유튜브 자동자막·클로바노트·브루 같은 걸로 만들어 넣을 수 있어야 한다.
+SUBTITLE_EXTS = {".srt", ".vtt"}
 UPLOAD_CHUNK = 1024 * 1024
 
 
@@ -263,6 +266,12 @@ class JobManager:
             config.set("memes.enabled", False)
         if job.options.get("no_subtitles"):
             config.set("subtitles.enabled", False)
+        subs = job.options.get("subs") or ""
+        if subs and Path(subs).exists():
+            # 폰에서 음성 인식을 돌리는 게 가장 무거운 단계다. 밖에서 만들어 온
+            # 자막이 있으면 그 단계를 통째로 건너뛴다.
+            config.set("transcribe.external", subs)
+            config.set("transcribe.backend", "external")
         if job.options.get("shorts"):
             config.set("project.resolution", "1080x1920")
         for key, value in EDIT_PACE.get(job.options.get("pace") or "", {}).items():
@@ -644,6 +653,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/upload":
             self._handle_upload()
             return
+        if path == "/api/upload-subs":
+            self._handle_upload(subtitle=True)
+            return
         if path == "/api/jobs":
             self._handle_create_job()
             return
@@ -713,12 +725,16 @@ class Handler(BaseHTTPRequestHandler):
                 })
         return files
 
-    def _handle_upload(self) -> None:
-        raw_name = unquote(self.headers.get("X-Filename") or "video.mp4")
-        name = Path(raw_name).name or "video.mp4"
-        if Path(name).suffix.lower() not in VIDEO_EXTS:
-            name += ".mp4"
-        target = self.manager.root / "uploads" / name
+    def _handle_upload(self, *, subtitle: bool = False) -> None:
+        default = "subs.srt" if subtitle else "video.mp4"
+        raw_name = unquote(self.headers.get("X-Filename") or default)
+        name = Path(raw_name).name or default
+        allowed = SUBTITLE_EXTS if subtitle else VIDEO_EXTS
+        if Path(name).suffix.lower() not in allowed:
+            name += ".srt" if subtitle else ".mp4"
+        folder = "subs" if subtitle else "uploads"
+        target = self.manager.root / folder / name
+        target.parent.mkdir(parents=True, exist_ok=True)
         counter = 2
         while target.exists():
             target = target.with_name(f"{Path(name).stem}_{counter}{Path(name).suffix}")
@@ -748,6 +764,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "업로드가 중간에 끊겼습니다"}, 400)
             return
         self._send_json({"path": str(target), "name": target.name})
+
+    def _checked_subs(self, raw) -> str:
+        """화면에서 온 자막 경로. 업로드한 자막 폴더 안의 것만 받는다."""
+        if not isinstance(raw, str) or not raw.strip():
+            return ""
+        path = Path(raw)
+        if path.suffix.lower() not in SUBTITLE_EXTS or not path.is_file():
+            return ""
+        try:
+            path.resolve().relative_to((self.manager.root / "subs").resolve())
+        except (ValueError, OSError):
+            return ""
+        return str(path)
 
     def _allowed_source(self, source: Path) -> bool:
         """서버가 편집해도 되는 파일인지.
@@ -792,6 +821,7 @@ class Handler(BaseHTTPRequestHandler):
             "shorts": bool(data.get("shorts")),
             "pace": resolve_pace(data.get("pace")),
             "style": resolve_style(data.get("style")),
+            "subs": self._checked_subs(data.get("subs")),
         }
         job = self.manager.create(source, options)
         self._send_json(job.as_dict())
