@@ -352,3 +352,31 @@ def test_gameedit_finds_whisper_cpp_in_that_layout(termux, monkeypatch):
     assert transcribe.find_whisper_model(size="base").endswith("ggml-base.bin")
     assert transcribe.whisper_cpp_ready({}) is True
     assert transcribe.resolve_backend("auto") == "whisper.cpp"
+
+
+def test_installer_creates_the_meme_fetcher_command(termux):
+    """코딩을 모르는 사람이 쓸 수 있게 명령 한 단어로 감싼다."""
+    assert run_script("install.sh", termux).returncode == 0
+
+    fetcher = termux["prefix"] / "bin" / "밈받기"
+    assert fetcher.exists() and os.access(fetcher, os.X_OK)
+    body = fetcher.read_text()
+    assert "tools/fetch_memes.py" in body
+    assert str(ROOT) in body
+    # 아무것도 안 적고 치면 쓰는 법이 나와야 한다
+    assert "이렇게 쓰세요" in body
+
+    link = termux["prefix"] / "bin" / "getmeme"
+    assert Path(os.path.realpath(link)) == fetcher.resolve()
+
+
+def test_meme_guide_warns_that_real_memes_are_not_downloadable(termux):
+    """받아지는 건 연출용 그림이지 유행 짤이 아니다. 기대를 미리 맞춰 둔다."""
+    shared = termux["home"] / "storage" / "shared"
+    shared.mkdir(parents=True)
+    assert run_script("install.sh", termux).returncode == 0
+
+    guide = (shared / "gameedit-memes" / "밈-넣는-법.txt").read_text()
+    assert "밈받기" in guide
+    assert "저작권" in guide
+    assert "크레딧.txt" in guide

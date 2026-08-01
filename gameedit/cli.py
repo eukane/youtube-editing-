@@ -298,6 +298,20 @@ def _print_plan_summary(plan: EditPlan, outputs: dict[str, Path]) -> None:
         log(f"\n검수: 브라우저로 {outputs['html']} 열기")
 
 
+def _print_credits(plan: EditPlan, out_dir: Path) -> None:
+    """받아 온 그림 중 **이번 영상에 실제로 쓰인 것만** 크레딧을 남긴다.
+
+    설명란에 붙여 넣는 걸 잊지 않게 완성본과 같은 폴더에 둔다.
+    """
+    from .credits import write_credits
+
+    path = write_credits(plan, out_dir)
+    if path is None:
+        return
+    log(f"\n⚠ 크레딧이 필요한 그림이 쓰였습니다: {path}")
+    log("  이 파일 내용을 유튜브 설명란에 붙여 넣으세요.")
+
+
 def cmd_preview(args) -> int:
     config = load_config(args)
     work_dir = resolve_work_dir(config, args)
@@ -336,6 +350,7 @@ def cmd_render(args) -> int:
     if args.dry_run:
         return 0
     log(f"\n완성: {job.output}  ({format_timecode(plan.duration)})")
+    _print_credits(plan, Path(job.output).parent)
     return 0
 
 
@@ -369,6 +384,7 @@ def cmd_auto(args) -> int:
     if args.dry_run:
         return 0
     log(f"\n완성: {job.output}  ({format_timecode(plan.duration)})")
+    _print_credits(plan, Path(job.output).parent)
     return 0
 
 

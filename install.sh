@@ -146,6 +146,21 @@ if [ -d "$MEME_DIR" ] && [ ! -f "$MEME_DIR/밈-넣는-법.txt" ]; then
   그림 : png jpg jpeg webp bmp
   움짤 : gif mp4 webm mov mkv
   소리 : mp3 wav m4a ogg flac aac
+
+────────────────────────────────────────
+인터넷에서 받아 오기
+
+  밈받기 폭발=explosion 웃음=laughing
+
+왼쪽이 자막에 나오면 뜰 말, 오른쪽이 검색어입니다 (영어가 결과가 많습니다).
+유튜브에 올려도 되는 라이선스만 받아서 이 폴더에 넣고, 저작자를
+'출처.txt' 에 적어 둡니다.
+
+⚠ 받아지는 건 폭발·불꽃 같은 **연출용 그림**이지 인터넷 유행 짤이 아닙니다.
+   방송 캡처나 유행 짤은 저작권이 있어서 자동으로 받아 올 수 없습니다.
+
+⚠ 영상을 다 만들면 완성본 옆에 '크레딧.txt' 가 생길 수 있습니다.
+   그 안의 글을 유튜브 설명란에 붙여 넣어야 합니다.
 GUIDE
 fi
 
@@ -195,6 +210,22 @@ chmod +x "$BIN"
 ln -sf "$BIN" "$PREFIX/bin/edit"
 ln -sf "$BIN" "$PREFIX/bin/gogo"
 
+# 인터넷에서 밈 그림 받아오기: '밈받기 폭발=explosion'
+FETCHER="$PREFIX/bin/밈받기"
+cat > "$FETCHER" <<EOF
+#!/data/data/com.termux/files/usr/bin/bash
+# 유튜브에 올려도 되는 라이선스의 그림만 받아 밈 폴더에 넣는다
+cd "$TARGET" || exit 1
+if [ \$# -eq 0 ]; then
+    echo "이렇게 쓰세요:  밈받기 폭발=explosion 웃음=laughing"
+    echo "  왼쪽 = 자막에 나오면 뜰 말 / 오른쪽 = 검색어(영어가 결과가 많음)"
+    exit 1
+fi
+python tools/fetch_memes.py "\$@"
+EOF
+chmod +x "$FETCHER"
+ln -sf "$FETCHER" "$PREFIX/bin/getmeme"
+
 # 최신 버전 받아오기: 'update' 한 단어
 UPDATER="$PREFIX/bin/update"
 cat > "$UPDATER" <<EOF
@@ -217,7 +248,9 @@ echo
 echo "      edit          (또는 편집기)"
 echo
 echo "  그러면 주소가 나옵니다. 크롬으로 그 주소를 여세요."
+echo
 echo "  나중에 최신 버전을 받으려면:  update"
+echo "  밈 그림을 받으려면:           밈받기 폭발=explosion"
 echo "=================================================="
 echo
 echo "지금 바로 켜보려면:  edit"
