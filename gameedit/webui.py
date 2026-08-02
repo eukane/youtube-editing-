@@ -189,10 +189,10 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
       <div class="row">
         <div style="flex:1">
           <div class="label">폰에서 음성 인식하기</div>
-          <div class="sub">위에 자막 파일을 안 넣었을 때만 씁니다.
-            긴 영상은 아주 오래 걸립니다</div>
+          <div class="sub">위에 자막 파일이 없을 때만. <b>한국어 정확도가 낮습니다</b> —
+            게임 용어·이름을 자주 틀립니다. 짧은 쇼츠에만 권합니다</div>
         </div>
-        <div class="switch on" id="sw-sub" onclick="toggleSub(this)"><i></i></div>
+        <div class="switch" id="sw-sub" onclick="toggleSub(this)"><i></i></div>
       </div>
       <div id="sub-warn" class="muted" style="display:none;margin:2px 2px 0;
            padding:10px 12px;border-radius:10px;background:#3a2a10;color:#f0c674"></div>
@@ -337,19 +337,31 @@ function updateSubWarning(){
   if (!box) return;
   const on = $('sw-sub').classList.contains('on');
   const mins = subMinutes();
-  // 자막 파일을 넣었으면 음성 인식을 아예 안 하므로 경고할 게 없다
-  if (!on || state.subs || mins < SUB_WARN_MINUTES){
+  box.style.display = 'block';
+
+  if (state.subs){                       // 자막 파일이 있으면 그게 이긴다
     box.style.display = 'none';
     return;
   }
+  if (!on){                              // 꺼 두면 대사 자막이 아예 없다
+    box.style.background = '#1b2430'; box.style.color = 'var(--dim)';
+    box.innerHTML =
+      '대사 자막 없이 <b>컷 편집 + 밈</b>만 들어갑니다.<br>' +
+      '자막을 넣으려면 위에 .srt 를 올리세요 (클로바노트·유튜브 자동자막).';
+    return;
+  }
   const measured = (state.speed && state.speed.ok);
-  box.style.display = 'block';
+  box.style.background = '#3a2a10'; box.style.color = '#f0c674';
   box.innerHTML =
-    `⚠ 이 영상은 음성 인식에만 <b>약 ${Math.round(mins)}분</b>이 걸립니다` +
-    (measured ? ' (이 기기에서 실제로 잰 값)' : ' (대략)') + '.<br>' +
-    '<b>클로바노트</b>나 <b>유튜브 자동자막</b>으로 .srt 를 만들어 위에 넣으면 ' +
-    '이 단계를 통째로 건너뛰고, 한국어 정확도도 더 좋습니다.<br>' +
-    '그냥 진행해도 됩니다 — 오래 걸릴 뿐입니다.';
+    (mins >= SUB_WARN_MINUTES
+      ? `⚠ 이 영상은 음성 인식에만 <b>약 ${Math.round(mins)}분</b>이 걸립니다` +
+        (measured ? ' (이 기기에서 실제로 잰 값)' : ' (대략)') + '.<br>'
+      : '⚠ 폰 음성 인식은 <b>한국어 정확도가 낮습니다.</b><br>') +
+    '게임 용어·사람 이름을 자주 틀려서 그대로 올리기 어려울 수 있습니다. ' +
+    '<b>클로바노트</b>나 <b>유튜브 자동자막</b>으로 .srt 를 받아 위에 넣는 쪽이 ' +
+    '빠르고 정확합니다.<br>' +
+    '짧은 쇼츠만 만든다면 <code>bash install-subtitles.sh small</code> 로 ' +
+    '큰 모델을 받아 보세요 — 느리지만 정확도가 올라갑니다.';
 }
 
 function toggleSub(el){ toggle(el); updateSubWarning(); }

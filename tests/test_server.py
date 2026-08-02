@@ -827,3 +827,45 @@ def test_external_subtitles_are_presented_as_the_faster_path():
 
     assert "만들어 둔 자막 넣기" in PAGE and "빠름" in PAGE
     assert "폰에서 음성 인식하기" in PAGE
+
+
+def test_turning_off_subtitles_skips_transcription_entirely():
+    """화면에 안 쓸 자막을 만드느라 몇 시간을 쓰면 안 된다.
+
+    폰 음성 인식은 실측 2.5배속이라 1시간 영상에 2시간 반이 걸린다.
+    자막을 끈 사람에게 그 시간을 물릴 이유가 없다.
+    """
+    import tempfile
+    from gameedit.server import Job, JobManager
+
+    with tempfile.TemporaryDirectory() as tmp:
+        manager = JobManager(Path(tmp), Config())
+        off = Job(id="a", source="/tmp/a.mp4", title="a", options={"no_subtitles": True})
+        assert manager._job_config(off).get("transcribe.backend") == "none"
+
+        on = Job(id="b", source="/tmp/a.mp4", title="a", options={})
+        assert manager._job_config(on).get("transcribe.backend") == "auto"
+
+
+def test_external_subtitles_survive_the_subtitle_switch(tmp_path):
+    """밖에서 만든 자막은 공짜다. 스위치를 껐다고 버리면 안 된다."""
+    import tempfile
+    from gameedit.server import Job, JobManager
+
+    srt = tmp_path / "대사.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,000\n안녕\n", encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp:
+        manager = JobManager(Path(tmp), Config())
+        job = Job(id="c", source="/tmp/a.mp4", title="a",
+                  options={"no_subtitles": True, "subs": str(srt)})
+        cfg = manager._job_config(job)
+        assert cfg.get("transcribe.backend") == "external"
+
+
+def test_phone_transcription_is_off_by_default():
+    """정확도가 낮은 걸 기본으로 켜 두면 안 된다. 켜는 건 사용자 선택이다."""
+    from gameedit.webui import PAGE
+
+    row = re.search(r'id="sw-sub"[^>]*', PAGE).group(0)
+    assert 'class="switch"' in re.search(r'<div class="switch[^"]*" id="sw-sub"', PAGE).group(0)
+    assert "한국어 정확도가 낮습니다" in PAGE

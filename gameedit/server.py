@@ -336,6 +336,10 @@ class JobManager:
             config.set("memes.enabled", False)
         if job.options.get("no_subtitles"):
             config.set("subtitles.enabled", False)
+            # 화면에 안 쓸 자막을 만드느라 몇 시간을 쓰면 안 된다.
+            # 밖에서 만든 자막이 있으면 그건 그대로 쓴다 (거의 공짜다).
+            if not job.options.get("subs"):
+                config.set("transcribe.backend", "none")
         subs = job.options.get("subs") or ""
         if subs and Path(subs).exists():
             # 폰에서 음성 인식을 돌리는 게 가장 무거운 단계다. 밖에서 만들어 온
