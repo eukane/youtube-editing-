@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .animation import entrance, resolve_level
 from .fonts import resolve_font
+from .media import fit_box
 from .models import Analysis, EditPlan, MemeCue, SubtitleCue, Segment
 
 _ALIGN = {
@@ -373,14 +374,12 @@ def with_title_card(sub_cfg: dict, project_cfg: dict, plan=None) -> dict:
 
 
 def content_box_height(src_w: int, src_h: int, out_w: int, out_h: int) -> float:
-    """원본을 출력 화면에 맞춰 넣었을 때 **영상이 실제로 차지하는 높이**.
+    """원본을 맞춰 넣었을 때 **영상이 실제로 차지하는 높이**.
 
     나머지 위아래가 빈 띠다. 쇼츠에서 제목·채널명을 넣을 자리를 여기서 잰다.
+    계산은 렌더와 같은 것을 쓴다 (media.fit_box).
     """
-    if min(src_w or 0, src_h or 0, out_w or 0, out_h or 0) <= 0:
-        return float(out_h or 0)
-    scale = min(out_w / src_w, out_h / src_h)
-    return min(float(out_h), src_h * scale)
+    return min(float(out_h or 0), fit_box(src_w, src_h, out_w, out_h)[1])
 
 
 def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,

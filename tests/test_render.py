@@ -608,3 +608,34 @@ def test_graph_labels_are_unique_per_clip():
                              speed=1.0, trim=True, src_width=2000, src_height=1200)
         tags.add(g[g.index("split=2["):g.index("];")])
     assert len(tags) == 4
+
+
+# --------------------------- 같은 계산이 두 군데 있으면 안 된다
+
+def test_render_and_subtitles_agree_on_the_content_box():
+    """렌더는 여백에 배경을 깔고 자막은 그 여백을 피해서 놓는다.
+
+    두 계산이 따로 있으면 한쪽만 고쳤을 때 글자가 영상 밖에 뜨거나
+    여백을 덮는다. 같은 함수(media.fit_box)를 써야 한다.
+    """
+    from gameedit.media import fit_box
+    from gameedit.render import padding_ratio
+    from gameedit.subtitles import content_box_height
+
+    for src in ((2000, 1200), (1920, 1080), (1080, 1920), (640, 480)):
+        for out in ((1080, 1920), (1280, 720), (1920, 1080)):
+            box_w, box_h = fit_box(*src, *out)
+            assert content_box_height(*src, *out) == pytest.approx(min(out[1], box_h))
+            covered = (box_w * box_h) / (out[0] * out[1])
+            assert padding_ratio(*src, *out) == pytest.approx(max(0.0, 1 - covered))
+
+
+def test_thread_rule_is_shared():
+    """ffmpeg 과 whisper.cpp 가 같은 규칙을 써야 코어 배분이 어긋나지 않는다."""
+    from gameedit.render import resolve_threads as render_threads
+    from gameedit.system import resolve_threads
+    from gameedit.transcribe import resolve_threads as whisper_threads
+
+    for raw in (0, 1, 4, -1, -2, -99):
+        assert render_threads({"threads": raw}) == resolve_threads(raw)
+        assert whisper_threads(raw) == resolve_threads(raw)

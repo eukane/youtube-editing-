@@ -14,8 +14,8 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from .media import FFmpegError, ffmpeg_bin, run
-from .system import available_memory_mb
+from .media import FFmpegError, ffmpeg_bin, fit_box, run
+from .system import available_memory_mb, resolve_threads as _threads
 from .models import EditPlan, MemeCue
 
 Logger = Callable[[str], None]
@@ -86,28 +86,16 @@ class RenderJob:
 
 
 def resolve_threads(cfg: dict) -> int:
-    """ffmpeg 에 넘길 스레드 수.
-
-        0 이상  그대로 (0 이면 ffmpeg 가 알아서 = 코어 전부)
-        음수    그만큼 코어를 남겨 둔다
-
-    코어를 전부 쓰면 같은 기기에서 브라우저 조작이 불가능해진다. 폰·태블릿
-    에서 편집기를 돌리면서 화면도 봐야 하므로 여유를 남기는 쪽이 낫다.
-    """
-    raw = int(cfg.get("threads", 0) or 0)
-    if raw >= 0:
-        return raw
-    cores = os.cpu_count() or 2
-    return max(1, cores + raw)
+    """ffmpeg 에 넘길 스레드 수 (규칙은 system.resolve_threads 참고)."""
+    return _threads(cfg.get("threads", 0))
 
 
 def padding_ratio(src_w: int, src_h: int, out_w: int, out_h: int) -> float:
     """원본을 출력 화면에 맞춰 넣었을 때 **검은 여백이 차지하는 비율**."""
     if min(src_w or 0, src_h or 0, out_w or 0, out_h or 0) <= 0:
         return 0.0
-    scale = min(out_w / src_w, out_h / src_h)
-    covered = (src_w * scale) * (src_h * scale)
-    return max(0.0, 1.0 - covered / (out_w * out_h))
+    box_w, box_h = fit_box(src_w, src_h, out_w, out_h)
+    return max(0.0, 1.0 - (box_w * box_h) / (out_w * out_h))
 
 
 # 여백이 이보다 크면 검정 대신 흐린 배경으로 채운다. 가로 게임 화면을

@@ -233,6 +233,21 @@ def extract_thumbnail(src: str | Path, t: float, dst: str | Path, *, width: int 
     return dst if dst.exists() else None
 
 
+def fit_box(src_w: int, src_h: int, out_w: int, out_h: int) -> tuple[float, float]:
+    """원본을 출력 화면 안에 **비율 그대로** 넣었을 때 차지하는 크기.
+
+    렌더의 `scale=...:force_original_aspect_ratio=decrease` 와 같은 계산이다.
+    나머지가 빈 여백이 되고, 자막은 그 여백을 피해서 놓아야 한다.
+
+    이 계산이 렌더와 자막 두 곳에 따로 있었다. 한쪽만 고치면 글자가 영상
+    밖에 떠 있거나 여백을 덮는다.
+    """
+    if min(src_w or 0, src_h or 0, out_w or 0, out_h or 0) <= 0:
+        return float(out_w or 0), float(out_h or 0)
+    scale = min(out_w / src_w, out_h / src_h)
+    return src_w * scale, src_h * scale
+
+
 def format_timecode(seconds: float, *, ms: bool = False) -> str:
     seconds = max(0.0, float(seconds))
     h = int(seconds // 3600)

@@ -209,8 +209,7 @@ def test_reports_when_a_bigger_model_does_not_fit(tmp_path, monkeypatch):
 
     folder = _install(tmp_path / "m", base=148, small=466)
     monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(folder),))
-    # speedtest 는 import 시점에 이름을 묶으므로 그쪽을 갈아 끼워야 한다
-    monkeypatch.setattr("gameedit.speedtest.available_memory_mb", lambda: 900.0)
+    monkeypatch.setattr("gameedit.system.available_memory_mb", lambda: 900.0)
 
     _names, note = describe_model_choice(str(folder / "ggml-base.bin"))
     assert "ggml-small.bin" in note and "메모리" in note
@@ -230,3 +229,25 @@ def test_page_shows_the_model_list():
 
     assert "models_found" in PAGE and "model_note" in PAGE
     assert "받아 둔 모델" in PAGE
+
+
+def test_memory_rule_is_shared_between_check_and_choice():
+    """재보기가 '된다' 고 한 모델을 실제로도 골라야 한다.
+
+    상수가 양쪽에 흩어져 있으면 "재보기는 된다는데 실제로는 작은 걸 쓰는"
+    식으로 조용히 어긋난다.
+    """
+    from pathlib import Path as _P
+    from gameedit.speedtest import model_memory_mb, memory_verdict
+    from gameedit.system import fits_in_memory
+    from gameedit.transcribe import model_fits
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        model = _P(tmp) / "ggml-small.bin"
+        model.write_bytes(b"\x00" * (466 * 1024 * 1024))
+        need = model_memory_mb("small", str(model))
+        for available in (400.0, 900.0, 1400.0, 3000.0):
+            said_ok = memory_verdict(need, available) == "ok"
+            actually_picks = model_fits(model, available)
+            assert said_ok == actually_picks == fits_in_memory(need, available)

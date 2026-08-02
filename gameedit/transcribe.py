@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Callable
 
 from .models import Segment, Transcript, Word
+from .system import fits_in_memory, memory_needed_mb, resolve_threads
 from .srt import parse_subtitle_file
 
 WHISPER_CPP_BINARIES = ("whisper-cli", "whisper-cpp", "whisper.cpp", "whisper", "main")
@@ -39,21 +40,6 @@ def _module_available(name: str) -> bool:
         return importlib.util.find_spec(name) is not None
     except (ImportError, ValueError):
         return False
-
-
-def resolve_threads(raw) -> int:
-    """whisper.cpp 에 넘길 스레드 수.
-
-        0 이상  그대로 (0 이면 whisper.cpp 기본값 = 보통 4)
-        음수    코어 수에서 그만큼 뺀다 (편집기·브라우저가 쓸 여유를 남긴다)
-    """
-    try:
-        raw = int(raw or 0)
-    except (TypeError, ValueError):
-        return 0
-    if raw >= 0:
-        return raw
-    return max(1, (os.cpu_count() or 2) + raw)
 
 
 def find_whisper_cpp(explicit: str = "") -> str | None:
@@ -87,22 +73,13 @@ def is_real_model(path: Path) -> bool:
         return False
 
 
-# 모델을 올리는 데 필요한 램은 파일 크기의 약 1.35배 + 계산 버퍼.
-MODEL_RAM_FACTOR = 1.35
-MODEL_RAM_OVERHEAD_MB = 180.0
-# 남은 메모리의 이 비율까지만 쓴다. 꽉 채우면 편집 단계에서 죽는다.
-MEMORY_HEADROOM = 0.6
-
-
-def model_fits(path: Path, available_mb: float) -> bool:
-    """이 모델을 지금 메모리로 올릴 수 있는지. 못 재면 그냥 된다고 본다."""
-    if available_mb <= 0:
-        return True
+def model_fits(path: Path, available_mb: float | None = None) -> bool:
+    """이 모델을 지금 메모리로 올릴 수 있는지."""
     try:
-        need = path.stat().st_size / (1024 * 1024) * MODEL_RAM_FACTOR + MODEL_RAM_OVERHEAD_MB
+        need = memory_needed_mb(path.stat().st_size)
     except OSError:
         return False
-    return need <= available_mb * MEMORY_HEADROOM
+    return fits_in_memory(need, available_mb)
 
 
 def installed_models() -> list[Path]:
@@ -140,11 +117,11 @@ def find_whisper_model(explicit: str = "", size: str = "") -> str | None:
             if size in model.name.lower():
                 return str(model)
 
-    from .system import available_memory_mb
-    available = available_memory_mb()
-    # 큰 것부터 보면서 메모리에 들어가는 첫 번째를 쓴다
+    # 큰 것부터 보면서 메모리에 들어가는 첫 번째를 쓴다.
+    # 여유 메모리는 system 이 직접 읽는다 — 여기서 미리 읽어 두면 같은 값을
+    # 얻는 경로가 둘이 되고, 한쪽만 바뀌었을 때 조용히 어긋난다.
     for model in sorted(found, key=lambda p: p.stat().st_size, reverse=True):
-        if model_fits(model, available):
+        if model_fits(model):
             return str(model)
     # 전부 빠듯하면 제일 작은 것이라도 (아예 못 하는 것보다 낫다)
     return str(min(found, key=lambda p: p.stat().st_size))

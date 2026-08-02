@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from .media import extract_audio, probe
-from .system import available_memory_mb
+from .system import available_memory_mb, memory_needed_mb, memory_verdict
 from .transcribe import find_whisper_model, resolve_backend, transcribe
 
 Logger = Callable[[str], None]
@@ -36,8 +36,7 @@ Logger = Callable[[str], None]
 SHORT_SAMPLE = 6.0
 LONG_SAMPLE = 45.0
 
-# 모델을 올리는 데 실제로 필요한 램 (whisper.cpp 기준, 대략).
-# 모델 파일이 있으면 파일 크기로 다시 계산하므로 이건 참고값이다.
+# 모델 파일이 없을 때만 쓰는 참고값. 파일이 있으면 크기로 계산한다.
 MODEL_RAM_MB = {
     "tiny": 400.0,
     "base": 550.0,
@@ -151,8 +150,7 @@ def model_memory_mb(model_name: str, model_path: str | None = None) -> float:
     """
     if model_path:
         try:
-            size_mb = Path(model_path).stat().st_size / (1024 * 1024)
-            return size_mb * 1.35 + 180.0
+            return memory_needed_mb(Path(model_path).stat().st_size)
         except OSError:
             pass
     name = (model_name or "").lower()
@@ -160,16 +158,6 @@ def model_memory_mb(model_name: str, model_path: str | None = None) -> float:
         if key in name:
             return need
     return MODEL_RAM_MB["base"]
-
-
-def memory_verdict(needed_mb: float, available_mb: float) -> str:
-    if available_mb <= 0:
-        return "unknown"
-    if needed_mb <= available_mb * 0.6:
-        return "ok"
-    if needed_mb <= available_mb * 0.95:
-        return "tight"
-    return "impossible"
 
 
 # ---------------------------------------------------------------- 속도 측정
@@ -324,8 +312,7 @@ def describe_model_choice(chosen: str | None) -> tuple[list[str], str]:
                            f"`cd ~/gameedit && bash install-subtitles.sh {nxt}`")
         return names, "받아 둔 것 중 제일 큰 모델입니다."
 
-    available = available_memory_mb()
-    blocked = [p.name for p in bigger if not model_fits(p, available)]
+    blocked = [p.name for p in bigger if not model_fits(p)]
     if blocked:
         return names, (f"더 큰 모델({', '.join(blocked)})이 있지만 지금 메모리로는 "
                        f"못 올립니다. 다른 앱을 닫고 다시 재보세요.")
