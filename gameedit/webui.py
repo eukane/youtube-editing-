@@ -177,8 +177,9 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
       </div>
       <div class="row">
         <div style="flex:1">
-          <div class="label">만들어 둔 자막 넣기</div>
-          <div class="sub" id="subs-name">유튜브 자동자막·클로바노트 등에서 받은 .srt</div>
+          <div class="label">만들어 둔 자막 넣기 <b style="color:var(--good)">· 빠름</b></div>
+          <div class="sub" id="subs-name">클로바노트·유튜브 자동자막에서 받은 .srt
+            (넣으면 아래 음성 인식을 건너뜁니다)</div>
         </div>
         <input type="file" id="subsfile" accept=".srt,.vtt" style="display:none"
                onchange="pickSubs(this)">
@@ -186,10 +187,15 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
              onclick="document.getElementById('subsfile').click()">파일</div>
       </div>
       <div class="row">
-        <div><div class="label">대사 자막</div>
-             <div class="sub">음성 인식이 설치돼 있을 때만</div></div>
-        <div class="switch on" id="sw-sub" onclick="toggle(this)"><i></i></div>
+        <div style="flex:1">
+          <div class="label">폰에서 음성 인식하기</div>
+          <div class="sub">위에 자막 파일을 안 넣었을 때만 씁니다.
+            긴 영상은 아주 오래 걸립니다</div>
+        </div>
+        <div class="switch on" id="sw-sub" onclick="toggleSub(this)"><i></i></div>
       </div>
+      <div id="sub-warn" class="muted" style="display:none;margin:2px 2px 0;
+           padding:10px 12px;border-radius:10px;background:#3a2a10;color:#f0c674"></div>
       <div class="row">
         <div><div class="label">쇼츠(세로) 로 만들기</div>
              <div class="sub">1080x1920 세로 영상</div></div>
@@ -313,6 +319,41 @@ function go(view){
 $('back').onclick = () => go(state.view === 'edit' ? 'job' : 'home');
 
 function toggle(el){ el.classList.toggle('on'); }
+// 폰 음성 인식은 실시간의 2.5배쯤 걸린다. 1시간 영상이면 2시간 반이다.
+// 재본 속도가 있으면 그 값으로, 없으면 이 값으로 미리 알려 준다.
+const SUB_SECONDS_PER_MINUTE = 150;
+const SUB_WARN_MINUTES = 20;      // 이보다 오래 걸릴 것 같으면 말린다
+
+function subMinutes(){
+  const dur = (state.file && state.file.duration) || 0;
+  if (!dur) return 0;
+  const rate = (state.speed && state.speed.ok && state.speed.seconds_per_minute)
+    ? state.speed.seconds_per_minute : SUB_SECONDS_PER_MINUTE;
+  return dur / 60 * rate / 60;
+}
+
+function updateSubWarning(){
+  const box = $('sub-warn');
+  if (!box) return;
+  const on = $('sw-sub').classList.contains('on');
+  const mins = subMinutes();
+  // 자막 파일을 넣었으면 음성 인식을 아예 안 하므로 경고할 게 없다
+  if (!on || state.subs || mins < SUB_WARN_MINUTES){
+    box.style.display = 'none';
+    return;
+  }
+  const measured = (state.speed && state.speed.ok);
+  box.style.display = 'block';
+  box.innerHTML =
+    `⚠ 이 영상은 음성 인식에만 <b>약 ${Math.round(mins)}분</b>이 걸립니다` +
+    (measured ? ' (이 기기에서 실제로 잰 값)' : ' (대략)') + '.<br>' +
+    '<b>클로바노트</b>나 <b>유튜브 자동자막</b>으로 .srt 를 만들어 위에 넣으면 ' +
+    '이 단계를 통째로 건너뛰고, 한국어 정확도도 더 좋습니다.<br>' +
+    '그냥 진행해도 됩니다 — 오래 걸릴 뿐입니다.';
+}
+
+function toggleSub(el){ toggle(el); updateSubWarning(); }
+
 function toggleShorts(el){
   toggle(el);
   $('shorts-extra').style.display = el.classList.contains('on') ? 'block' : 'none';
@@ -429,6 +470,8 @@ function openOptions(file){
   if ($('shorts-channel')) $('shorts-channel').value = state.channel;
   $('shorts-extra').style.display =
     $('sw-shorts').classList.contains('on') ? 'block' : 'none';
+  state.speed = null;
+  updateSubWarning();
   $('subs-name').textContent = '유튜브 자동자막·클로바노트 등에서 받은 .srt';
   state.style = state.style || '';
   $('styles').innerHTML = STYLES.map(([id,name]) =>
@@ -547,7 +590,7 @@ async function runSpeedtest(){
     if (s.running) return;
     clearInterval(speedTimer); speedTimer = null;
     $('speed-btn').textContent = '다시 재기';
-    if (s.report) showSpeed(s.report);
+    if (s.report){ state.speed = s.report; showSpeed(s.report); updateSubWarning(); }
     else { $('speed-out').textContent = '결과를 받지 못했습니다.'; }
   }, 2000);
 }
@@ -562,6 +605,7 @@ async function pickSubs(input){
     if (r.error) throw new Error(r.error);
     state.subs = r.path;
     $('subs-name').textContent = '✅ ' + r.name + ' — 음성 인식을 건너뜁니다';
+    updateSubWarning();          // 자막을 넣었으니 경고를 내린다
   } catch(e){ toast('자막 올리기 실패: ' + e.message); }
 }
 

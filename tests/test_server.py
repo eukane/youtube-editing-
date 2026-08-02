@@ -794,3 +794,36 @@ def test_shorts_inputs_are_wired_in_the_page():
     assert "shorts_title:" in PAGE and "channel:" in PAGE
     # 쇼츠를 켰을 때만 보여야 한다
     assert "function toggleShorts" in PAGE
+
+
+# ------------------------------- 오래 걸리는 음성 인식을 미리 말려 준다
+
+def test_page_warns_before_a_long_transcription():
+    """폰 음성 인식은 실시간의 2.5배다. 1시간 영상이면 2시간 반이다.
+
+    누르고 나서 알면 이미 늦다. 시작 전에 대안(.srt)을 알려 줘야 한다.
+    """
+    from gameedit.webui import PAGE
+
+    assert "function updateSubWarning" in PAGE
+    assert "클로바노트" in PAGE
+    # 자막 파일을 넣었으면 경고할 게 없다 (음성 인식을 안 하므로)
+    body = re.search(r"function updateSubWarning\(\)\{(.*?)\n\}", PAGE, re.S).group(1)
+    assert "state.subs" in body
+    # 재본 값이 있으면 그걸 쓰고, 없으면 대략치를 쓴다
+    assert "seconds_per_minute" in body or "seconds_per_minute" in PAGE
+
+
+def test_measured_speed_is_remembered_for_the_warning():
+    from gameedit.webui import PAGE
+
+    assert "state.speed = s.report" in PAGE
+    body = re.search(r"function subMinutes\(\)\{(.*?)\n\}", PAGE, re.S).group(1)
+    assert "state.speed" in body and "SUB_SECONDS_PER_MINUTE" in body
+
+
+def test_external_subtitles_are_presented_as_the_faster_path():
+    from gameedit.webui import PAGE
+
+    assert "만들어 둔 자막 넣기" in PAGE and "빠름" in PAGE
+    assert "폰에서 음성 인식하기" in PAGE
