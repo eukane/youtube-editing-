@@ -55,8 +55,12 @@ bash ~/gameedit/install.sh
 **방법 2 — 폰에서 직접 (짧은 영상에만 권합니다)**
 
 ```
-bash ~/gameedit/install-subtitles.sh base
+cd ~/gameedit
+bash install-subtitles.sh base
 ```
+
+⚠️ `cd ~/gameedit` 를 먼저 쳐야 합니다. 다른 폴더에서 치면
+`No such file or directory` 가 납니다.
 
 ⚠️ **실측: 오디오 1분당 149초** (미디어텍 G99 · 8코어 · base 모델).
 실시간의 약 2.5배라 **1시간 영상이면 자막에만 2시간 30분**이 걸립니다.
@@ -165,6 +169,15 @@ edit --set render.segment_batch=3 --set render.threads=-3 --set render.nice=19
 
 **업데이트** (프로그램을 고쳐 올렸을 때)
 Termux 에서 `update` 한 단어. 자동 반영은 안 되고 이걸 쳐야 받아집니다.
+실행 명령(`edit`·`밈받기`)도 같이 갱신됩니다.
+
+**`update` 를 해도 예전 동작이 그대로일 때**
+2026-08 이전에 설치했다면 `update` 가 코드만 받고 실행 명령은 안 고쳤습니다.
+딱 한 번만:
+
+```
+cd ~/gameedit && bash install.sh --commands
+```
 
 > 세로 영상도 그대로 세로로 나옵니다. 말이 없는 영상(마이크 없이 녹화)은 소리로 고를 수가 없어
 > 균등 간격으로 잘라 주고 그 사실을 화면에 알립니다.

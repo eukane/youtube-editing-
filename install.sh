@@ -23,6 +23,17 @@ if [ -z "$PREFIX" ] || [ ! -d "$TERMUX_ROOT" ]; then
     exit 1
 fi
 
+# `update` 가 부르는 모드. 프로그램은 이미 깔려 있고 실행 명령만 다시
+# 등록한다. 이게 없으면 설치 스크립트를 고쳐도 이미 설치한 사람에게는
+# 영원히 전달되지 않는다 (실제로 termux-wake-lock 수정이 안 닿았다).
+COMMANDS_ONLY=""
+[ "$1" = "--commands" ] && COMMANDS_ONLY=1
+
+if [ -n "$COMMANDS_ONLY" ]; then
+    TARGET="$HOME/gameedit"
+    [ -f "./pyproject.toml" ] && TARGET="$(pwd)"
+else
+
 echo "[1/5] 폰 저장소 접근 권한"
 if [ ! -d "$HOME/storage" ]; then
     echo "      화면에 뜨는 권한 요청에서 '허용' 을 눌러 주세요."
@@ -192,6 +203,8 @@ if [ -d "$TERM_DIR" ] && [ ! -f "$TERM_DIR/용어-넣는-법.txt" ]; then
 GUIDE
 fi
 
+fi   # COMMANDS_ONLY
+
 echo "[5/5] 실행 명령 등록"
 BIN="$PREFIX/bin/편집기"
 # 잠금 해제 명령은 termux-wake-unlock 이다. wake-lock 쪽에 해제 옵션을 붙여
@@ -235,6 +248,9 @@ cd "$TARGET" || exit 1
 echo "최신 버전을 받는 중…"
 git pull --ff-only || { echo "❌ 받기 실패. 인터넷 연결을 확인해 주세요."; exit 1; }
 pip install -e . >/dev/null 2>&1 || pip install -e .
+# 실행 명령(편집기·밈받기·update 자신)도 같이 갱신한다. 이걸 안 하면
+# 설치 스크립트를 고쳐도 이미 설치한 사람에게는 전달되지 않는다.
+bash "$TARGET/install.sh" --commands >/dev/null 2>&1 || true
 echo "✅ 최신 버전입니다. 이제 edit 을 치면 됩니다."
 EOF
 chmod +x "$UPDATER"

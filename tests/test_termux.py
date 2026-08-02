@@ -382,3 +382,38 @@ def test_meme_guide_warns_that_real_memes_are_not_downloadable(termux):
     assert "밈받기" in guide
     assert "저작권" in guide
     assert "크레딧.txt" in guide
+
+
+def test_update_refreshes_the_launcher_commands(termux):
+    """설치 스크립트를 고쳐도 이미 설치한 사람에게 전달되지 않던 문제.
+
+    실제로 termux-wake-lock 수정과 '밈받기' 명령이 몇 주 동안 안 닿았다.
+    update 는 코드만 받고 실행 파일은 예전 것을 그대로 뒀다.
+    """
+    assert run_script("install.sh", termux).returncode == 0
+    updater = (termux["prefix"] / "bin" / "update").read_text()
+    assert "--commands" in updater and "install.sh" in updater
+
+
+def test_commands_only_mode_skips_the_slow_steps(termux):
+    """명령만 다시 등록하는 모드. 패키지 설치를 다시 하면 몇 분씩 걸린다."""
+    assert run_script("install.sh", termux).returncode == 0
+    termux["log"].write_text("")                    # 지금까지의 호출 기록을 지운다
+
+    proc = run_script("install.sh", termux, "--commands")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    calls = termux["log"].read_text()
+    assert "apt-get" not in calls, "패키지 설치를 다시 하고 있다"
+    assert "termux-setup-storage" not in calls
+    # 그래도 실행 파일은 다시 만들어져야 한다
+    for name in ("편집기", "밈받기", "update"):
+        assert (termux["prefix"] / "bin" / name).exists(), name
+
+
+def test_launcher_never_prints_the_wake_lock_usage(termux):
+    """`termux-wake-lock -u` 는 없는 옵션이라 사용법이 화면에 찍힌다."""
+    assert run_script("install.sh", termux, "--commands").returncode == 0
+    body = (termux["prefix"] / "bin" / "편집기").read_text()
+    assert "termux-wake-unlock" in body
+    assert "wake-lock -u" not in body
