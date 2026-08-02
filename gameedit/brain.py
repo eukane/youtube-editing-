@@ -16,12 +16,26 @@
 돈이 나가므로 두 가지를 지킨다.
   · 요청 전에 예상 금액을 재고, 상한을 넘으면 아예 부르지 않는다
   · 실제로 쓴 토큰을 내역서에 남긴다 (cost.Ledger)
+
+**공식 SDK 대신 표준 라이브러리로 직접 호출한다.** 취향이 아니라 이 기기에
+설치가 안 되기 때문이다. anthropic SDK 는 `jiter` 와 `pydantic_core` 라는
+Rust 확장에 의존하는데, 안드로이드용 미리 빌드된 휠이 없어서 소스에서
+컴파일하려 든다. 실제 폰에서 확인한 오류가 이것이다.
+
+    Target triple not supported by rustup: aarch64-unknown-linux-android
+    Rust not found, installing into a temporary directory
+
+이 프로그램은 폰에서 도는 게 목적이라 여기서는 SDK 를 쓸 수 없다. 보내는
+내용(엔드포인트·헤더·본문)은 SDK 가 보내는 것과 같다.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -41,13 +55,14 @@ def _noop(_msg: str) -> None:
     pass
 
 
-def sdk_available() -> bool:
-    import importlib.util
+API_URL = "https://api.anthropic.com/v1/messages"
+API_VERSION = "2023-06-01"
+TIMEOUT = 180.0
+RETRIES = 3
 
-    try:
-        return importlib.util.find_spec("anthropic") is not None
-    except (ImportError, ValueError):
-        return False
+
+class ApiError(Exception):
+    """API 호출이 실패했다. 사람이 읽을 이유를 담는다."""
 
 
 def load_key(explicit: str = "") -> str:
@@ -215,6 +230,60 @@ def estimate_call(prompt: str, model: str) -> float:
 
 # ---------------------------------------------------------------- 호출
 
+def call_api(key: str, body: dict, *, url: str = API_URL) -> dict:
+    """Messages API 한 번 호출. 표준 라이브러리만 쓴다.
+
+    429(요청 과다)와 5xx(서버 문제)는 잠깐 쉬었다 다시 시도한다. 그 외
+    오류는 다시 해도 같은 결과라 바로 올린다 — 키가 틀렸는데 세 번 더
+    부르면 기다리는 시간만 는다.
+    """
+    # HTTP 헤더는 latin-1 만 담을 수 있다. 폰에서 키를 붙여넣다 보면 한글이나
+    # 보이지 않는 글자가 섞이는데, 그대로 보내면 UnicodeEncodeError 라는
+    # 알아볼 수 없는 오류로 죽는다. 여기서 잡아서 사람 말로 알려 준다.
+    key = (key or "").strip()
+    if not key.isascii():
+        raise ApiError("키에 한글이나 특수문자가 섞여 있습니다. "
+                       "복사할 때 앞뒤가 잘못 붙지 않았는지 확인해 주세요.")
+
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": API_VERSION,
+    }
+    last: Exception = ApiError("호출하지 못했습니다")
+    for attempt in range(RETRIES):
+        request = urllib.request.Request(url, data=payload, headers=headers,
+                                         method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as err:
+            detail = _error_detail(err)
+            if err.code in (429, 500, 502, 503, 529) and attempt < RETRIES - 1:
+                wait = float(err.headers.get("retry-after") or (2 ** attempt))
+                time.sleep(min(wait, 20.0))
+                last = ApiError(detail)
+                continue
+            raise ApiError(f"[{err.code}] {detail}") from err
+        except (urllib.error.URLError, TimeoutError, OSError) as err:
+            if attempt < RETRIES - 1:
+                time.sleep(2 ** attempt)
+                last = err
+                continue
+            raise
+    raise last
+
+
+def _error_detail(err: urllib.error.HTTPError) -> str:
+    """오류 본문에서 사람이 읽을 부분만."""
+    try:
+        body = json.loads(err.read().decode("utf-8"))
+        return str(body.get("error", {}).get("message") or body)[:200]
+    except Exception:
+        return err.reason or "알 수 없는 오류"
+
+
 def decide(analysis: Analysis, cfg: dict, ledger: Ledger, *,
            target_seconds: float, wishes: str = "", log: Logger = _noop) -> Decision:
     """AI 에게 편집 판단을 받는다. 못 부르면 이유를 담아 빈 결과를 돌려준다.
@@ -226,11 +295,6 @@ def decide(analysis: Analysis, cfg: dict, ledger: Ledger, *,
     if not cfg.get("enabled", False):
         result.error = "AI 편집이 꺼져 있습니다"
         return result
-    if not sdk_available():
-        result.error = ("AI 라이브러리가 없습니다. Termux 에서 "
-                        "`pip install anthropic` 을 실행해 주세요.")
-        return result
-
     key = load_key(str(cfg.get("api_key", "")))
     if not key:
         result.error = ("API 키가 없습니다. `~/.gameedit-key` 파일에 키를 "
@@ -248,30 +312,30 @@ def decide(analysis: Analysis, cfg: dict, ledger: Ledger, *,
 
     log(f"  · AI 에게 판단 요청 ({model}, 예상 {expected:.0f}원)")
     try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=key)
-        response = client.messages.create(
-            model=model,
-            max_tokens=8000,
-            system=SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-            output_config={"format": {"type": "json_schema", "schema": DECISION_SCHEMA}},
-        )
+        response = call_api(key, {
+            "model": model,
+            "max_tokens": 8000,
+            "system": SYSTEM,
+            "messages": [{"role": "user", "content": prompt}],
+            "output_config": {"format": {"type": "json_schema",
+                                         "schema": DECISION_SCHEMA}},
+        })
     except Exception as err:                       # 네트워크·잔액·키 오류 전부
         result.error = _friendly_error(err)
         log(f"  · AI 를 쓰지 못했습니다: {result.error}")
         return result
 
-    usage = getattr(response, "usage", None)
+    # 실제로 쓴 토큰. 예상값이 아니라 응답이 알려 준 값을 남긴다.
+    usage = response.get("usage") or {}
     ledger.add("AI 편집 판단", model,
-               input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
-               output_tokens=int(getattr(usage, "output_tokens", 0) or 0))
+               input_tokens=int(usage.get("input_tokens", 0) or 0),
+               output_tokens=int(usage.get("output_tokens", 0) or 0))
 
     try:
-        text = next(b.text for b in response.content if b.type == "text")
+        text = next(b["text"] for b in response.get("content", [])
+                    if b.get("type") == "text")
         data = json.loads(text)
-    except (StopIteration, ValueError, AttributeError) as err:
+    except (StopIteration, ValueError, KeyError, TypeError) as err:
         result.error = f"AI 답을 읽지 못했습니다: {err}"
         return result
 
@@ -295,15 +359,19 @@ def _sane_range(item) -> bool:
 
 
 def _friendly_error(err: Exception) -> str:
-    """SDK 예외를 사람 말로. 무엇을 해야 하는지가 들어 있어야 한다."""
-    name = type(err).__name__
+    """오류를 사람 말로. **무엇을 해야 하는지**가 들어 있어야 한다."""
     text = str(err)
-    if "Authentication" in name or "401" in text:
-        return "API 키가 잘못됐습니다. 키를 다시 확인해 주세요."
-    if "RateLimit" in name or "429" in text:
+    low = text.lower()
+    if "[401]" in text or "authentication" in low or "invalid x-api-key" in low:
+        return "API 키가 잘못됐습니다. ~/.gameedit-key 의 키를 다시 확인해 주세요."
+    if "[403]" in text or "permission" in low:
+        return "이 키로는 쓸 수 없습니다. 콘솔에서 키 권한을 확인해 주세요."
+    if "credit" in low or "billing" in low or "[402]" in text:
+        return "잔액이 부족합니다. console.anthropic.com 의 Billing 에서 충전해 주세요."
+    if "[429]" in text or "rate" in low:
         return "요청이 너무 잦습니다. 잠시 뒤에 다시 해 주세요."
-    if "credit" in text.lower() or "billing" in text.lower():
-        return "잔액이 부족합니다. 콘솔에서 충전해 주세요."
-    if "Connection" in name or "Timeout" in name:
-        return "인터넷 연결이 안 됩니다."
-    return f"{name}: {text[:120]}"
+    if "[404]" in text or "not_found" in low:
+        return "모델 이름이 잘못됐습니다. 설정의 ai.model 을 확인해 주세요."
+    if isinstance(err, (urllib.error.URLError, TimeoutError, OSError)):
+        return "인터넷 연결이 안 됩니다. 와이파이를 확인해 주세요."
+    return text[:160]

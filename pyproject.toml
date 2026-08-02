@@ -16,9 +16,6 @@ dependencies = [
 [project.optional-dependencies]
 # 음성 인식(자막)용. 없으면 외부 자막 파일(--subs)로 대체 가능.
 whisper = ["faster-whisper>=1.0"]
-# AI 편집 판단용. 안드로이드(Termux)에서는 pydantic_core·jiter 가 Rust 로
-# 빌드돼야 해서 설치가 오래 걸리거나 실패할 수 있다.
-ai = ["anthropic>=0.60"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]
