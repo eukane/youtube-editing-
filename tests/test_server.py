@@ -714,7 +714,6 @@ def test_chosen_options_survive_a_restart(tmp_path):
     from gameedit.models import Clip, EditPlan, MediaInfo
     from gameedit.server import JobManager, load_job_options
 
-    manager = JobManager(tmp_path, Config())
     work = tmp_path / "jobs" / "abc1234567"
     work.mkdir(parents=True)
     job = Job(id="abc1234567", source="/tmp/a.mp4", title="a",
@@ -866,7 +865,6 @@ def test_phone_transcription_is_off_by_default():
     """정확도가 낮은 걸 기본으로 켜 두면 안 된다. 켜는 건 사용자 선택이다."""
     from gameedit.webui import PAGE
 
-    row = re.search(r'id="sw-sub"[^>]*', PAGE).group(0)
     assert 'class="switch"' in re.search(r'<div class="switch[^"]*" id="sw-sub"', PAGE).group(0)
     assert "한국어 정확도가 낮습니다" in PAGE
 

@@ -100,8 +100,8 @@ SOUNDS: dict[str, tuple[float, list[str]]] = {
                  tone(1000, 0.9, 0.28, decay=1.2, gain=0.32, wave="sq"),
                  tone(800, 1.2, 0.28, decay=1.2, gain=0.32, wave="sq"),
                  tone(1000, 1.5, 0.28, decay=1.2, gain=0.32, wave="sq")]),
-    "드럼롤": (1.8, [f"0.32*(2*random(0)-1)*(0.55+0.45*sin(2*PI*26*t))"
-                  f"*min(1,t*3)*between(t,0,1.55)",
+    "드럼롤": (1.8, ["0.32*(2*random(0)-1)*(0.55+0.45*sin(2*PI*26*t))"
+                  "*min(1,t*3)*between(t,0,1.55)",
                   tone(196, 1.55, 0.25, decay=9, gain=0.5),
                   noise(1.55, 0.2, gain=0.4, decay=16)]),
 }

@@ -5,8 +5,8 @@
 # 안드로이드에서는 faster-whisper(파이토치)가 돌아가지 않습니다.
 # 대신 C++ 로 만든 whisper.cpp 를 빌드해서 씁니다.
 #
-#   bash termux자막설치.sh          # 기본(base) 모델
-#   bash termux자막설치.sh small    # 더 정확하지만 느리고 무거움
+#   bash ~/gameedit/install-subtitles.sh          # 기본(base) 모델
+#   bash ~/gameedit/install-subtitles.sh small    # 더 정확하지만 느리고 무거움
 #
 set -e
 

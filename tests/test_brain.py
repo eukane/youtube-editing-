@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from gameedit.brain import (DECISION_SCHEMA, Decision, build_prompt, build_transcript_view,
+from gameedit.brain import (DECISION_SCHEMA, build_prompt, build_transcript_view,
                             call_api, decide, estimate_call, load_key, mask_key, _sane_range)
 from gameedit.cost import Ledger
 from gameedit.models import Analysis, AudioAnalysis, MediaInfo, Segment, Transcript

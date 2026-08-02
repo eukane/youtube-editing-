@@ -9,7 +9,7 @@
 
 import pytest
 
-from gameedit.cost import (DEFAULT_MODEL, Estimate, Ledger, estimate_edit,
+from gameedit.cost import (DEFAULT_MODEL, Ledger, estimate_edit,
                            image_tokens, krw, text_tokens)
 
 

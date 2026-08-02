@@ -68,15 +68,26 @@ def analyze_video(src: str | Path, config: Config, work_dir: Path, *,
                                scale_width=int(acfg.get("scene_scale_width", 320)))
         log(f"      컷 {len(scenes)}개")
 
+    tcfg = dict(config.section("transcribe"))
+    external = str(tcfg.get("external") or "")
+    # 밖에서 만들어 온 자막 파일은 음성 인식이 아니다. 읽는 데 몇 밀리초면 되고
+    # 소리가 필요하지도 않다. --no-transcribe 나 무음 영상 때문에 이걸 같이
+    # 버리면, 사용자는 자막을 넣었는데 결과물에 한 줄도 안 나온다.
+    has_external = bool(external and Path(external).exists())
+
     transcript = None
-    if skip_transcribe:
+    if skip_transcribe and not has_external:
         log("[4/4] 전사 건너뜀 (--no-transcribe)")
-    elif not media.has_audio:
+    elif not media.has_audio and not has_external:
         log("[4/4] 오디오가 없어 전사를 건너뜁니다.")
     else:
-        progress("음성 인식", 0.6)
-        log("[4/4] 음성 인식(자막) 진행…")
-        tcfg = dict(config.section("transcribe"))
+        if has_external:
+            progress("자막 읽기", 0.6)
+            log("[4/4] 자막 파일 읽는 중…")
+            tcfg["backend"] = "external"
+        else:
+            progress("음성 인식", 0.6)
+            log("[4/4] 음성 인식(자막) 진행…")
         transcript = transcribe(wav_path, tcfg, log=lambda m: log(f"      {m}"))
         log(f"      대사 {len(transcript.segments)}줄")
 

@@ -9,6 +9,7 @@ ffmpeg 의 drawtext 대신 libass 를 쓰기 때문에 한글 줄바꿈·외곽�
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from .animation import entrance, resolve_level
@@ -258,6 +259,24 @@ def reference_resolution(width: int, height: int, *, base_height: int = 1080) ->
     return ref_w - (ref_w % 2), base_height
 
 
+def aspect_scale(width: int, *, base_width: int = 1920) -> float:
+    """가로세로 비율이 달라져도 글자가 화면 대비 비슷해 보이게 하는 배율.
+
+    자막 좌표계는 높이를 1080 으로 고정한다(reference_resolution). 그래서
+    16:9 면 폭이 1920 이고 9:16(쇼츠)이면 608 이다. 글자 크기 설정은 하나뿐인데
+    같은 62 가 쇼츠에서는 화면 대비 3.2배로 보인다 — 실제로 한 줄에 세 글자만
+    들어가서 자막이 영상 밖 빈 띠까지 넘치고 채널명에 닿았다.
+
+    폭에 그대로 비례시키면(×0.32) 이번엔 너무 작아진다. 넓이의 제곱근으로
+    잡으면 한 줄에 12~14자로 실제 쇼츠와 비슷해진다.
+
+    16:9 는 배율이 정확히 1.0 이라 지금까지 뽑던 가로 영상은 한 픽셀도 안 변한다.
+    """
+    if width <= 0 or base_width <= 0 or width >= base_width:
+        return 1.0
+    return math.sqrt(width / base_width)
+
+
 def _as_word_list(value) -> list[str]:
     if not value:
         return []
@@ -395,12 +414,15 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     font = cfg.get("font", "Noto Sans CJK KR")
     if cfg.get("font_fallback", True):
         font = resolve_font(font)
-    size = int(cfg.get("font_size", 62))
+    # 세로 영상에서는 같은 글자 크기가 화면 대비 3배로 보인다. 여기서 한 번만
+    # 줄여 두면 아래 모든 스타일이 size·outline 에서 파생되므로 같이 맞는다.
+    letter = aspect_scale(width)
+    size = max(12, int(round(int(cfg.get("font_size", 62)) * letter)))
     bold = -1 if cfg.get("bold", True) else 0
     primary = cfg.get("primary_color", "&H00FFFFFF")
     outline_color = cfg.get("outline_color", "&H00101010")
-    outline = float(cfg.get("outline", 4.0))
-    shadow = float(cfg.get("shadow", 2.0))
+    outline = round(float(cfg.get("outline", 4.0)) * letter, 2)
+    shadow = round(float(cfg.get("shadow", 2.0)) * letter, 2)
     margin_v = int(cfg.get("margin_v", 70))
     emphasis_color = cfg.get("emphasis_color", "&H0033E8FF")
     align = _ALIGN.get(cfg.get("position", "bottom"), 2)
@@ -423,9 +445,26 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
     band = max(0.0, (height - float(band_content_height or height)) / 2.0)
     if band < height * 0.06:
         band = 0.0
+    # 아래쪽에 붙는 Impact 는 대사 자막 여백의 '절반'을 쓴다. 그 절반 계산에
+    # 띠 높이까지 섞이면 띠도 반만 들어가서 자막이 띠 안으로 내려간다 — 실제로
+    # 채널명 바로 위까지 내려왔다. 띠는 나눠 쓰는 값이 아니라 통째로 더한다.
+    impact_v = (impact_margin_v or max(20, int(margin_v * 0.5))) + int(band)
+    top_band = int(band)          # 위쪽에 붙는 것들도 띠를 피해야 한다
     margin_v += int(band)
-    if impact_margin_v:
-        impact_margin_v += int(band)
+
+    # 띠에 넣는 제목·채널명은 대사 자막이 아니라 **띠 높이**에 맞춘다.
+    # 대사 크기를 따라가면 띠가 좁을 때 글자가 영상 위로 넘치고, 띠가 넓으면
+    # 빈 자리가 그대로 남는다.
+    band_title = max(size, int(band * 0.22)) if band else int(size * 1.25)
+    band_channel = max(int(size * 0.7), int(band * 0.15)) if band else int(size * 0.85)
+
+    # 가운데 밈 글씨는 보통 화면 정가운데다. 그런데 쇼츠에서는 영상이 차지하는
+    # 높이가 3분의 1밖에 안 돼서, 정가운데가 곧 대사 자막 자리다 — 실제로
+    # "?!?!?!" 가 대사 위에 포개졌다. 띠가 있으면 영상 윗부분으로 올린다.
+    if band:
+        meme_center_align, meme_center_v = 8, int(band) + int((height - band * 2) * 0.06)
+    else:
+        meme_center_align, meme_center_v = 5, 0
 
     header = [
         "[Script Info]",
@@ -448,21 +487,21 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
         # 클립 라벨(좌상단)과 겹치지 않도록 밈 텍스트는 조금 아래에서 시작한다
         _style_line("MemeTop", font=font, size=int(size * 1.25), primary="&H0000F0FF",
                     outline_color="&H00101010", bold=-1, outline=outline + 1, shadow=shadow,
-                    align=8, margin_v=110),
+                    align=8, margin_v=110 + top_band),
         _style_line("MemeCenter", font=font, size=int(size * 1.9), primary="&H003C3CFF",
                     outline_color="&H00FFFFFF", bold=-1, outline=outline + 2, shadow=shadow + 1,
-                    align=5, margin_v=0),
+                    align=meme_center_align, margin_v=meme_center_v),
         # 전환 카드("3분 후"): 화면 가운데에 반투명 검은 판 위 흰 글씨
         _card_style_line("Card", font=font, size=int(size * 1.5), primary="&H00FFFFFF"),
         _style_line("Label", font=font, size=int(size * 0.72), primary="&H00FFFFFF",
                     outline_color="&H00202020", bold=-1, outline=max(1.0, outline - 1), shadow=1,
-                    align=7, margin_v=40, margin_l=54),
+                    align=7, margin_v=40 + top_band, margin_l=54),
         # 제일 센 대사용. 실제 편집본에서 화면 폭을 거의 채우는 빨간 글씨 +
         # 두꺼운 검은 외곽선으로 나가는 그 자막.
         _style_line("Impact", font=font, size=int(size * impact_scale),
                     primary=impact_color, outline_color="&H00000000", bold=-1,
                     outline=outline * 2.2, shadow=shadow + 1,
-                    align=2, margin_v=(impact_margin_v or max(20, int(margin_v * 0.5))),
+                    align=2, margin_v=impact_v,
                     margin_l=24, margin_r=24),
         # 상황 설명·해설용 (괄호로 시작하는 줄). 대사 자막과 겹치지 않게 위쪽.
         _style_line("Narr", font=font, size=int(size * float(cfg.get("narr_scale", 0.7))),
@@ -475,8 +514,7 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
                     primary="&H00FFFFFF", outline_color="&H00000000", bold=-1,
                     outline=outline * 1.4, shadow=shadow,
                     align=2,
-                    margin_v=(impact_margin_v or max(20, int(margin_v * 0.5)))
-                    + int(size * impact_scale * 1.15),
+                    margin_v=impact_v + int(size * impact_scale * 1.15),
                     margin_l=24, margin_r=24),
         # 타이틀 카드: 검은 화면 + 노란 날짜 + 흰 제목
         _style_line("TitleDate", font=font, size=int(size * 0.95), primary="&H0000E8FF",
@@ -488,10 +526,10 @@ def build_ass(cues: list[SubtitleCue], meme_cues: list[MemeCue], cfg: dict,
         f"Style: TitleBg,{font},10,&H00000000,&H000000FF,&H00000000,&H00000000,"
         f"0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1",
         # 쇼츠 위아래 빈 자리에 넣는 제목·채널명
-        _style_line("ShortsTitle", font=font, size=int(size * 1.25), primary="&H00FFFFFF",
+        _style_line("ShortsTitle", font=font, size=band_title, primary="&H00FFFFFF",
                     outline_color="&H00000000", bold=-1, outline=outline + 1, shadow=shadow,
                     align=5, margin_v=0, margin_l=24, margin_r=24),
-        _style_line("ShortsChannel", font=font, size=int(size * 0.85),
+        _style_line("ShortsChannel", font=font, size=band_channel,
                     primary=cfg.get("channel_color", "&H0033E8FF"),
                     outline_color="&H00000000", bold=-1, outline=outline, shadow=shadow,
                     align=5, margin_v=0, margin_l=24, margin_r=24),

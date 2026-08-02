@@ -121,3 +121,78 @@ def test_rotation_parsed_from_ffmpeg_output():
 
     text = "    Side data:\n      displaymatrix: rotation of -90.00 degrees\n"
     assert _ROTATION_RE.search(text).group(1) == "-90.00"
+
+
+# ------------------------------- 밖에서 만들어 온 자막은 음성 인식이 아니다
+
+from gameedit.models import AudioAnalysis
+
+def _fake_probe(has_audio=True):
+    from gameedit.models import MediaInfo
+
+    def probe(_src):
+        return MediaInfo(path="/tmp/a.mp4", duration=90.0, width=1920, height=1080,
+                         fps=30.0, has_audio=has_audio)
+    return probe
+
+
+def _srt(tmp_path):
+    path = tmp_path / "밖에서.srt"
+    path.write_text(
+        "1\n00:00:03,000 --> 00:00:06,500\n와 이거 진짜 대박이다\n\n"
+        "2\n00:00:20,000 --> 00:00:23,500\n아 죽었어 미쳤나 진짜\n",
+        encoding="utf-8")
+    return path
+
+
+def _analyze_with_srt(tmp_path, monkeypatch, *, skip_transcribe, has_audio=True):
+    from gameedit import analyze as mod
+    from gameedit.config import Config
+
+    monkeypatch.setattr(mod, "probe", _fake_probe(has_audio))
+    monkeypatch.setattr(mod, "extract_audio", lambda *a, **k: tmp_path / "audio.wav")
+    monkeypatch.setattr(mod, "analyze_audio", lambda *a, **k: AudioAnalysis(hop=0.5))
+    monkeypatch.setattr(mod, "detect_scenes", lambda *a, **k: [])
+
+    config = Config()
+    config.set("analyze.scene_threshold", 0)
+    config.set("transcribe.external", str(_srt(tmp_path)))
+    return mod.analyze_video("/tmp/a.mp4", config, tmp_path / "work",
+                             skip_transcribe=skip_transcribe)
+
+
+def test_external_subtitles_survive_no_transcribe(tmp_path, monkeypatch):
+    """--no-transcribe 는 '음성 인식을 돌리지 마라'는 뜻이다.
+
+    .srt 파일을 읽는 건 음성 인식이 아니라 텍스트 파일 읽기다(몇 밀리초).
+    같이 건너뛰면 사용자는 자막을 넣었는데 결과물에 한 줄도 안 나온다.
+    권장 경로(폰 인식 끄고 .srt 쓰기)가 통째로 조용히 망가진다.
+    """
+    got = _analyze_with_srt(tmp_path, monkeypatch, skip_transcribe=True)
+    assert got.transcript is not None
+    assert len(got.transcript.segments) == 2
+    assert "대박" in got.transcript.segments[0].text
+
+
+def test_external_subtitles_work_without_audio(tmp_path, monkeypatch):
+    """소리가 없는 영상이어도 밖에서 만든 자막은 넣을 수 있어야 한다."""
+    got = _analyze_with_srt(tmp_path, monkeypatch, skip_transcribe=False, has_audio=False)
+    assert got.transcript is not None
+    assert len(got.transcript.segments) == 2
+
+
+def test_no_transcribe_without_srt_still_skips(tmp_path, monkeypatch):
+    """자막 파일이 없으면 --no-transcribe 는 원래대로 건너뛴다."""
+    from gameedit import analyze as mod
+    from gameedit.config import Config
+
+    monkeypatch.setattr(mod, "probe", _fake_probe(True))
+    monkeypatch.setattr(mod, "extract_audio", lambda *a, **k: tmp_path / "audio.wav")
+    monkeypatch.setattr(mod, "analyze_audio", lambda *a, **k: AudioAnalysis(hop=0.5))
+    monkeypatch.setattr(mod, "detect_scenes", lambda *a, **k: [])
+    monkeypatch.setattr(mod, "transcribe", lambda *a, **k: pytest.fail("음성 인식이 돌면 안 된다"))
+
+    config = Config()
+    config.set("analyze.scene_threshold", 0)
+    got = mod.analyze_video("/tmp/a.mp4", config, tmp_path / "work", skip_transcribe=True)
+    assert not got.transcript.segments        # transcribe 가 아예 안 불렸다

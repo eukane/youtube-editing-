@@ -353,7 +353,7 @@ def test_colour_is_reserved_for_emphasis(scfg):
 
 import re as _re
 
-from gameedit.subtitles import build_ass, content_box_height
+from gameedit.subtitles import content_box_height
 
 
 def _shorts_ass(**over):
@@ -421,3 +421,109 @@ def test_banner_covers_the_whole_video():
     line = [ln for ln in body.splitlines() if ",ShortsTitle," in ln][0]
     assert line.split(",")[1].strip() == "0:00:00.00"
     assert line.split(",")[2].strip() == "0:00:30.00"
+
+
+# ------------------------- 세로(쇼츠)에서 글자 크기와 자리 (실제로 두 번 틀림)
+
+from gameedit.subtitles import aspect_scale
+
+
+def _styles(ass):
+    """ASS 스타일 줄 → {이름: {크기, 정렬, 아래여백}}"""
+    out = {}
+    for line in ass.splitlines():
+        if not line.startswith("Style: "):
+            continue
+        f = line[len("Style: "):].split(",")
+        out[f[0]] = {"size": int(f[2]), "align": int(f[18]),
+                     "margin_v": int(f[21])}
+    return out
+
+
+def test_horizontal_output_is_untouched():
+    """16:9 는 배율이 정확히 1.0 이어야 한다.
+
+    이미 뽑아 본 가로 영상이 이 수정 때문에 달라지면 안 된다.
+    """
+    assert aspect_scale(1920) == 1.0
+    assert aspect_scale(2560) == 1.0          # 더 넓어도 키우지는 않는다
+
+
+def test_vertical_text_shrinks_to_a_readable_line():
+    """세로에서는 자막 좌표계 폭이 608 로 줄어든다.
+
+    글자 크기를 그대로 두면 화면 대비 3.2배가 되어 한 줄에 세 글자만 들어갔다.
+    실제 쇼츠처럼 한 줄에 열 글자 이상은 들어가야 한다.
+    """
+    ass = _shorts_ass()
+    main = _styles(ass)["Main"]
+    play_x = int(_re.search(r"PlayResX: (\d+)", ass).group(1))
+    per_line = (play_x - 120) // main["size"]
+    assert 10 <= per_line <= 20, f"한 줄에 {per_line}자"
+
+
+def test_dialogue_never_lands_in_the_empty_band():
+    """자막이 영상 밖 띠로 내려가면 채널명과 겹친다. 실제로 겹쳤다.
+
+    Impact 는 대사 여백의 '절반'을 쓰는데, 그 여백에 띠 높이가 이미 더해져
+    있어서 띠도 반만 반영됐다. 아래로 붙는 것과 위로 붙는 것 모두 확인한다.
+    """
+    ass = _shorts_ass()
+    play_y = int(_re.search(r"PlayResY: (\d+)", ass).group(1))
+    content = content_box_height(1920, 1080, 1080, 1920) / 1920 * play_y
+    band = (play_y - content) / 2
+
+    # 화면 전체를 쓰는 것들은 띠 안에 들어가도 되는 것들이다
+    whole_frame = {"Card", "TitleBg", "TitleDate", "TitleName",
+                   "ShortsTitle", "ShortsChannel"}
+    for name, s in _styles(ass).items():
+        if name in whole_frame:
+            continue
+        if s["align"] in (1, 2, 3):          # 아래에 붙음
+            assert s["margin_v"] >= band, f"{name} 이 아래 띠로 내려간다"
+        elif s["align"] in (7, 8, 9):        # 위에 붙음
+            assert s["margin_v"] >= band, f"{name} 이 위 띠로 올라간다"
+
+
+def test_band_text_is_sized_by_the_band_not_the_dialogue():
+    """띠에 넣는 제목·채널명은 띠 높이에 맞춘다.
+
+    대사 자막 크기를 따라가게 두면, 대사를 줄인 순간 제목까지 같이 작아져서
+    넓은 띠가 텅 빈다.
+    """
+    styles = _styles(_shorts_ass())
+    play_y = 1080
+    content = content_box_height(1920, 1080, 1080, 1920) / 1920 * play_y
+    band = (play_y - content) / 2
+
+    title = styles["ShortsTitle"]["size"]
+    channel = styles["ShortsChannel"]["size"]
+    assert title > styles["Main"]["size"]         # 대사보다 크다
+    assert channel > styles["Main"]["size"] * 0.8
+    assert title * 2 < band                       # 두 줄이 띠 안에 들어간다
+    assert channel < band
+
+
+def test_centre_meme_text_does_not_sit_on_the_dialogue():
+    """쇼츠는 영상이 화면의 3분의 1뿐이라 '한가운데'가 곧 대사 자리다.
+
+    실제로 "?!?!?!" 가 대사 글자 위에 포개져서 둘 다 못 읽었다.
+    가운데 밈은 영상 윗부분, 대사는 아랫부분으로 갈라 놓는다.
+    """
+    ass = _shorts_ass()
+    styles = _styles(ass)
+    play_y = int(_re.search(r"PlayResY: (\d+)", ass).group(1))
+
+    meme, impact = styles["MemeCenter"], styles["Impact"]
+    assert meme["align"] in (7, 8, 9), "띠가 있으면 위쪽에 붙여야 한다"
+
+    meme_bottom = meme["margin_v"] + meme["size"]
+    impact_top = play_y - impact["margin_v"] - impact["size"] * 2   # 두 줄까지 가정
+    assert meme_bottom < impact_top, f"밈 {meme_bottom} 이 대사 {impact_top} 를 덮는다"
+
+
+def test_horizontal_keeps_the_centre_meme_in_the_middle():
+    """가로 영상은 가운데가 비어 있다. 지금까지 나오던 그대로 둔다."""
+    styles = _styles(build_ass([], [], dict(Config().section("subtitles"))))
+    assert styles["MemeCenter"]["align"] == 5
+    assert styles["MemeCenter"]["margin_v"] == 0
