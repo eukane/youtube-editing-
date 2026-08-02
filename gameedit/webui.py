@@ -1,19 +1,27 @@
-"""폰 브라우저에서 열리는 화면 (HTML 한 장).
+"""폰 브라우저에서 열리는 화면.
 
 앱 설치 없이 아이폰·안드로이드 모두에서 쓰려고 순수 HTML/CSS/JS 로 만들었다.
 외부 라이브러리를 전혀 쓰지 않아서 인터넷 없이 집 와이파이만으로 동작한다.
+나갈 때도 파일 하나다 — 폰에서 정적 파일 경로로 씨름할 일이 없다.
+
+한 덩어리이던 것을 셋으로 나눠 뒀다. 800줄짜리 문자열 하나에서는 생김새를
+고치려다 동작을 건드리기 쉽다. 맨 아래에서 다시 하나로 합친다.
+
+    _CSS   생김새
+    _BODY  화면 구조 (어떤 칸이 있는지)
+    _JS    동작 (서버와 주고받기, 화면 전환)
 """
 
-PAGE = r"""<!doctype html>
+_HEAD = r"""<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0d1017">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>게임 하이라이트 편집기</title>
-<style>
-:root{
+<title>게임 하이라이트 편집기</title>"""
+
+_CSS = r""":root{
   --bg:#0d1017; --card:#161b26; --line:#232a38; --text:#e6e9ef; --dim:#8b95a8;
   --accent:#58a6ff; --accent2:#1f6feb; --good:#3fb950; --warn:#d29922; --bad:#f85149;
   color-scheme: dark;
@@ -105,11 +113,9 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
        background:#1f2633; border:1px solid var(--line); border-radius:12px; padding:12px 18px;
        font-size:14px; opacity:0; pointer-events:none; transition:opacity .25s; max-width:88%}
 .toast.on{opacity:1}
-.empty{text-align:center; color:var(--dim); padding:34px 10px; font-size:14px; line-height:1.7}
-</style>
-</head>
-<body>
+.empty{text-align:center; color:var(--dim); padding:34px 10px; font-size:14px; line-height:1.7}"""
 
+_BODY = r"""
 <header>
   <button id="back" style="display:none" onclick="go('home')">‹ 뒤로</button>
   <h1 id="title">🎮 하이라이트 편집기</h1>
@@ -277,10 +283,9 @@ video{width:100%; border-radius:12px; background:#000; margin-top:4px}
 <div class="bottom" id="bottom" style="display:none">
   <button class="btn" id="action" onclick="action()">시작</button>
 </div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"></div>"""
 
-<script>
-const KEY = (new URLSearchParams(location.search).get('k')) ||
+_JS = r"""const KEY = (new URLSearchParams(location.search).get('k')) ||
             localStorage.getItem('gameedit_key') || '';
 if (KEY) localStorage.setItem('gameedit_key', KEY);
 
@@ -775,10 +780,8 @@ async function replan(){
 }
 
 refresh();
-setInterval(() => { if (state.view === 'home') refresh(); }, 5000);
-</script>
-</body>
-</html>
-"""
+setInterval(() => { if (state.view === 'home') refresh(); }, 5000);"""
 
-__all__ = ["PAGE"]
+# 서버는 PAGE 하나만 알면 된다.
+PAGE = (_HEAD + "\n<style>\n" + _CSS + "\n</style>\n</head>\n<body>\n"
+        + _BODY + "\n<script>\n" + _JS + "\n</script>\n</body>\n</html>\n")
