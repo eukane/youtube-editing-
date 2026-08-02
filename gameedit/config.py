@@ -174,6 +174,22 @@ DEFAULTS: dict[str, Any] = {
         "max_total": 40,
         "format": "{term} · {info}",
     },
+    # AI 가 대사를 읽고 편집을 판단한다. 자세한 근거는 brain.py 참고.
+    # 돈이 나가므로 기본은 꺼져 있고, 상한선도 함께 둔다.
+    "ai": {
+        "enabled": False,
+        "model": "claude-opus-5",
+        "api_key": "",            # 비우면 환경변수·~/.gameedit-key 에서 찾는다
+        "mode": "dialogue",       # dialogue = 대사만 / vision = 화면까지 (아직 미구현)
+        "limit_krw": 500.0,       # 영상 하나당 상한. 0 이면 제한 없음
+        # 화면 보기용 값 (vision 모드에서만 쓴다)
+        "frame_every": 1.0,
+        "scan_width": 320,
+        "scan_height": 180,
+        "closeup_frames": 40,
+        "closeup_width": 1280,
+        "closeup_height": 720,
+    },
     # 고른 구간을 '편집'으로 만드는 단계. 자세한 근거는 editing.py 참고.
     "editing": {
         "enabled": True,
