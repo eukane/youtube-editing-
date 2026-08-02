@@ -10,13 +10,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import os
 from pathlib import Path
 from typing import Callable
 
 from .media import FFmpegError, ffmpeg_bin, fit_box, run
-from .system import available_memory_mb, resolve_threads as _threads
 from .models import EditPlan, MemeCue
+from .system import available_memory_mb, resolve_threads as _threads
 
 Logger = Callable[[str], None]
 Progress = Callable[[str, float], None]

@@ -414,7 +414,7 @@ def test_every_offered_style_survives_validation():
 # ------------------------------------------- 원본보다 긴 완성본은 못 만든다
 
 def test_file_listing_reports_duration(tmp_path, monkeypatch):
-    from gameedit import server as S
+    from gameedit import jobs as S
 
     video = tmp_path / "a.mp4"
     video.write_bytes(b"x" * 10)
@@ -427,7 +427,7 @@ def test_file_listing_reports_duration(tmp_path, monkeypatch):
 
 
 def test_broken_file_does_not_break_the_listing(tmp_path, monkeypatch):
-    from gameedit import server as S
+    from gameedit import jobs as S
 
     video = tmp_path / "broken.mp4"
     video.write_bytes(b"not a video")
@@ -441,13 +441,13 @@ def test_broken_file_does_not_break_the_listing(tmp_path, monkeypatch):
 
 
 def test_missing_file_is_zero(tmp_path):
-    from gameedit.server import probe_duration
+    from gameedit.jobs import probe_duration
 
     assert probe_duration(tmp_path / "없음.mp4") == 0.0
 
 
 def test_duration_is_cached_per_file_version(tmp_path, monkeypatch):
-    from gameedit import server as S
+    from gameedit import jobs as S
 
     video = tmp_path / "a.mp4"
     video.write_bytes(b"x")
