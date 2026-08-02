@@ -869,3 +869,71 @@ def test_phone_transcription_is_off_by_default():
     row = re.search(r'id="sw-sub"[^>]*', PAGE).group(0)
     assert 'class="switch"' in re.search(r'<div class="switch[^"]*" id="sw-sub"', PAGE).group(0)
     assert "한국어 정확도가 낮습니다" in PAGE
+
+
+# ------------------------- 화면에서 온 값은 못 믿는다 (실제로 죽었다)
+
+@pytest.mark.parametrize("bad", ["가나다", "3분", {"a": 1}, [], None, "",
+                                 float("nan"), float("inf"), 1e30, -5, 0])
+def test_bad_target_duration_does_not_kill_the_job(bad):
+    """예전에는 `float("3분")` 이 편집 스레드를 통째로 죽였다.
+
+    사용자에게는 이유 없는 실패로만 보인다. nan·1e30 은 예외는 안 나지만
+    이후 계산을 전부 망친다.
+    """
+    import tempfile
+    from gameedit.jobs import Job, JobManager
+
+    with tempfile.TemporaryDirectory() as tmp:
+        manager = JobManager(Path(tmp), Config())
+        job = Job(id="x", source="/tmp/a.mp4", title="a",
+                  options={"target_duration": bad})
+        got = manager._job_config(job).get("highlight.target_duration")
+        assert got == Config().get("highlight.target_duration")   # 기본값으로
+
+
+@pytest.mark.parametrize("good,expect", [(180, 180.0), ("300", 300.0), (5.0, 5.0)])
+def test_valid_target_duration_is_kept(good, expect):
+    import tempfile
+    from gameedit.jobs import Job, JobManager
+
+    with tempfile.TemporaryDirectory() as tmp:
+        manager = JobManager(Path(tmp), Config())
+        job = Job(id="x", source="/tmp/a.mp4", title="a",
+                  options={"target_duration": good})
+        assert manager._job_config(job).get("highlight.target_duration") == expect
+
+
+@pytest.mark.parametrize("edits", [
+    None, {}, {"removed_clips": "전부"}, {"removed_clips": [999, -1, "가", None]},
+    {"removed_clips": {"a": 1}}, {"subtitle_edits": "문자열"},
+    {"subtitle_edits": {"가": "글"}}, {"subtitle_edits": {"0": None}},
+    {"drop_memes": "네"},
+])
+def test_garbage_edits_never_raise(plan, edits):
+    """폰이 이상한 걸 보내도 서버가 죽으면 안 된다."""
+    out = apply_phone_edits(plan, edits)
+    assert out.clips                      # 최소한 계획은 남는다
+
+
+def test_removing_every_clip_is_refused(server, tmp_path):
+    """클립을 전부 빼면 만들 수 없다. 만들다 실패하는 것보다 미리 막는 게 낫다."""
+    from gameedit.models import Clip, EditPlan, MediaInfo
+    from gameedit.jobs import Job
+
+    base, manager, _ = server
+    work = tmp_path / "jobs" / "abc0000001"
+    work.mkdir(parents=True)
+    p = EditPlan(source="/tmp/a.mp4", media=MediaInfo(path="/tmp/a.mp4", duration=60.0))
+    p.clips = [Clip(source_start=0.0, source_end=5.0), Clip(source_start=10.0, source_end=15.0)]
+    p.relayout()
+    save_json(p, work / "plan.json")
+    job = Job(id="abc0000001", source="/tmp/a.mp4", title="a")
+    job.work_dir = str(work)
+    job.status = "done"
+    with manager.lock:
+        manager.jobs[job.id] = job
+        manager.order.append(job.id)
+
+    code, body = post_json(base, f"/api/jobs/{job.id}/replan", {"removed_clips": [0, 1]})
+    assert code == 400 and "전부" in body["error"]

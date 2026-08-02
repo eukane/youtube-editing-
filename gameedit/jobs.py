@@ -141,6 +141,30 @@ def resolve_pace(value) -> str:
     return value if isinstance(value, str) and value in EDIT_PACE else "normal"
 
 
+# 완성본 길이로 받아들일 범위. 밖의 값은 사용자가 잘못 보낸 것이다.
+MIN_TARGET = 5.0
+MAX_TARGET = 6 * 3600.0
+
+
+def resolve_target(value, default: float = 0.0) -> float:
+    """화면에서 온 완성본 길이. 못 쓸 값이면 default.
+
+    여기는 네트워크에서 온 JSON 이 그대로 들어오는 자리다. 예전에는
+    `float(value)` 를 바로 불러서 `"3분"` 같은 게 오면 **편집 작업 스레드가
+    통째로 죽었다.** 사용자에게는 이유 없는 실패로만 보인다.
+    `nan` 이나 1e30 은 예외는 안 나지만 이후 계산을 전부 망친다.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number != number or number in (float("inf"), float("-inf")):   # nan / inf
+        return default
+    if not (MIN_TARGET <= number <= MAX_TARGET):
+        return default
+    return number
+
+
 OPTIONS_FILE = "options.json"
 
 
@@ -296,9 +320,9 @@ class JobManager:
     # -- 실행 --------------------------------------------------------------
     def _job_config(self, job: Job) -> Config:
         config = Config(self.config.data)
-        target = job.options.get("target_duration")
+        target = resolve_target(job.options.get("target_duration"))
         if target:
-            config.set("highlight.target_duration", float(target))
+            config.set("highlight.target_duration", target)
         if job.options.get("no_memes"):
             config.set("memes.enabled", False)
         if job.options.get("no_subtitles"):

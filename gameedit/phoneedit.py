@@ -57,11 +57,12 @@ def _as_index(value) -> int | None:
         return None
 
 
-def apply_phone_edits(plan: EditPlan, edits: dict) -> EditPlan:
+def apply_phone_edits(plan: EditPlan, edits: dict | None) -> EditPlan:
     """폰에서 보낸 수정 사항을 편집 계획에 반영.
 
     잘못된 값이 섞여 와도 서버가 죽지 않도록 조용히 무시한다.
     """
+    edits = edits or {}          # 화면이 아무것도 안 보냈으면 그대로 둔다
     raw_removed = edits.get("removed_clips") or []
     if isinstance(raw_removed, (str, bytes)) or not hasattr(raw_removed, "__iter__"):
         raw_removed = []
