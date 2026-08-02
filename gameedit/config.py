@@ -249,7 +249,9 @@ PROFILES: dict[str, dict] = {
             "scene_scale_width": 160,
             "hop": 0.1,
         },
-        "transcribe": {"model": "tiny", "compute_type": "int8"},
+        # whisper.cpp 기본값(4스레드)은 8코어 기기에서 절반만 쓰는 셈이다.
+        # 두 코어만 남기고 나머지를 다 쓴다.
+        "transcribe": {"model": "base", "compute_type": "int8", "threads": -2},
         "render": {
             "preset": "veryfast", "crf": 26, "audio_bitrate": "128k",
             # 폰·태블릿에서는 편집기와 브라우저가 같은 기기에 있다. 코어를

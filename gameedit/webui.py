@@ -519,7 +519,10 @@ function showSpeed(r){
   rows.push(`오디오 1분당 ${Math.round(r.seconds_per_minute)}초 · ${esc(r.model || r.backend)}`);
   if (r.memory_verdict && r.memory_verdict !== 'ok')
     rows.push(`⚠ ${esc(r.memory_note)}`);
-  if (r.sample_text)
+  if (r.no_speech)
+    rows.push('<br>⚠ 잰 구간에 말이 없어서 인식기가 아무 말이나 지어냈습니다.<br>' +
+              '위 속도도 실제보다 빠르게 나온 값입니다. 말이 있는 영상으로 다시 재보세요.');
+  else if (r.sample_text)
     rows.push(`<br>인식된 대사 — 맞는지 직접 보세요<br><i>${esc(r.sample_text)}</i>`);
   out.innerHTML = rows.join('<br>');
 }

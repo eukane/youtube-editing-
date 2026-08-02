@@ -18,8 +18,11 @@
 
 from __future__ import annotations
 
+import array
+import re
 import tempfile
 import time
+import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -76,6 +79,7 @@ class SpeedReport:
     memory_verdict: str = "unknown"      # ok | tight | impossible | unknown
 
     source_duration: float = 0.0
+    no_speech: bool = False              # 인식 결과가 '말이 없어서 지어낸 것' 같은지
 
     def predict(self, duration: float) -> float:
         """길이 duration(초) 짜리 영상의 자막에 걸릴 시간(초)."""
@@ -95,6 +99,7 @@ class SpeedReport:
             "seconds_per_minute": round(self.seconds_per_minute, 1),
             "sample_text": self.sample_text,
             "sample_lines": self.sample_lines,
+            "no_speech": self.no_speech,
             "memory_available_mb": round(self.memory_available_mb),
             "memory_needed_mb": round(self.memory_needed_mb),
             "memory_verdict": self.memory_verdict,
@@ -163,11 +168,70 @@ def memory_verdict(needed_mb: float, available_mb: float) -> str:
 
 # ---------------------------------------------------------------- 속도 측정
 
-def _sample_windows(duration: float) -> list[tuple[float, float]]:
+PROBE_POINTS = 8
+PROBE_SECONDS = 2.5
+
+# 이 정도도 안 되면 사실상 무음이다 (16bit 기준 RMS)
+QUIET_RMS = 200.0
+
+
+def _rms(wav_path: Path) -> float:
+    """wav 조각의 소리 크기. 말이 있는지 없는지 가늠하는 용도."""
+    try:
+        with wave.open(str(wav_path)) as handle:
+            frames = handle.readframes(handle.getnframes())
+    except (OSError, wave.Error):
+        return 0.0
+    if len(frames) < 4:
+        return 0.0
+    samples = array.array("h")
+    samples.frombytes(frames[:len(frames) - len(frames) % 2])
+    if not samples:
+        return 0.0
+    total = sum(float(s) * s for s in samples)
+    return (total / len(samples)) ** 0.5
+
+
+def find_talking_point(source, duration: float, *, log: Logger = _noop) -> float:
+    """말이 있을 만한 지점을 찾는다.
+
+    조용한 구간을 재면 두 가지가 다 틀어진다. 인식기가 할 일이 없어 일찍
+    끝나서 **속도가 실제보다 몇 배 빠르게** 나오고, 결과로 나오는 글자는
+    인식기가 지어낸 헛소리라 사용자가 "모델이 고장났나" 로 오해한다.
+    실제로 `[몇일이 없음] [몇일이 없음]` 이 나오고 1시간에 5분이라는
+    말도 안 되는 값이 찍혔다.
+
+    영상 곳곳에서 짧게 소리 크기를 재고 제일 시끄러운 곳을 고른다.
+    (말인지 게임 소리인지는 구분 못 하지만, 무음보다는 훨씬 낫다)
+    """
+    duration = max(0.0, float(duration))
+    if duration <= PROBE_SECONDS * 2:
+        return 0.0
+
+    best_start, best_rms = duration * 0.5, -1.0
+    with tempfile.TemporaryDirectory(prefix="gameedit-probe-") as tmp:
+        for i in range(PROBE_POINTS):
+            # 앞뒤 10% 는 인트로·엔딩이라 건너뛴다
+            start = duration * (0.1 + 0.8 * i / max(1, PROBE_POINTS - 1))
+            start = min(start, max(0.0, duration - PROBE_SECONDS))
+            probe_wav = Path(tmp) / f"p{i}.wav"
+            try:
+                extract_audio(source, probe_wav, start=start, duration=PROBE_SECONDS)
+            except Exception:
+                continue
+            level = _rms(probe_wav)
+            if level > best_rms:
+                best_start, best_rms = start, level
+
+    if best_rms < QUIET_RMS:
+        log("  · 영상 전체가 조용합니다. 속도가 실제보다 빠르게 나올 수 있습니다.")
+    return best_start
+
+
+def _sample_windows(duration: float, center: float = -1.0) -> list[tuple[float, float]]:
     """어디를 잘라서 재 볼지. (시작, 길이) 두 개.
 
-    영상 가운데에서 뽑는다. 앞뒤는 인트로·엔딩이라 말이 없을 때가 많고, 말이
-    없으면 인식기가 일찍 끝나 버려서 속도가 실제보다 빠르게 나온다.
+    center 는 말이 있을 것 같은 지점. 안 주면 영상 가운데를 쓴다.
     """
     duration = max(0.0, float(duration))
     if duration <= 0:
@@ -175,12 +239,31 @@ def _sample_windows(duration: float) -> list[tuple[float, float]]:
 
     long_len = min(LONG_SAMPLE, max(6.0, duration * 0.5))
     short_len = min(SHORT_SAMPLE, max(1.0, long_len * 0.15))
-    # 긴 조각을 가운데에 놓고, 짧은 조각은 그 바로 앞에서 뽑는다
-    long_start = max(0.0, duration * 0.5 - long_len / 2)
+    if center < 0:
+        center = duration * 0.5
+    long_start = min(max(0.0, center), max(0.0, duration - long_len))
     short_start = max(0.0, long_start - short_len - 1.0)
     if short_start + short_len > duration:
         short_start = 0.0
     return [(short_start, short_len), (long_start, long_len)]
+
+
+def looks_like_no_speech(text: str) -> bool:
+    """인식 결과가 '말이 없어서 지어낸 것' 처럼 보이는지.
+
+    whisper 는 무음 구간에서 `[음악]` 같은 태그나 같은 문구 반복을 뱉는다.
+    그걸 그대로 보여 주면 사용자는 모델이 고장난 줄 안다.
+    """
+    text = (text or "").strip()
+    if not text:
+        return True
+    # 대괄호·괄호 태그를 걷어내고 남는 게 거의 없으면 말이 아니다
+    stripped = re.sub(r"[\[\(][^\]\)]*[\]\)]", "", text).strip()
+    if len(stripped) < max(4, len(text) * 0.3):
+        return True
+    # 같은 조각이 계속 반복되면 (환각의 전형적인 모습)
+    chunks = [c for c in re.split(r"[\s.,!?]+", text) if c]
+    return len(chunks) >= 3 and len(set(chunks)) <= max(1, len(chunks) // 3)
 
 
 def _solve(measured: list[tuple[float, float]]) -> tuple[float, float]:
@@ -245,7 +328,11 @@ def measure(source: str | Path, config, *, log: Logger = _noop) -> SpeedReport:
             "더 작은 모델(base 또는 tiny)을 받아 주세요.")
         return report
 
-    windows = _sample_windows(report.source_duration)
+    # 조용한 구간을 재면 인식기가 일찍 끝나서 속도가 몇 배 빠르게 나오고,
+    # 결과 글자도 지어낸 헛소리라 "모델이 고장났나" 로 오해하게 된다.
+    log("  · 말이 있는 구간을 찾는 중…")
+    center = find_talking_point(source, report.source_duration, log=log)
+    windows = _sample_windows(report.source_duration, center)
     with tempfile.TemporaryDirectory(prefix="gameedit-speed-") as tmp:
         for index, (start, length) in enumerate(windows):
             wav = Path(tmp) / f"sample{index}.wav"
@@ -272,6 +359,7 @@ def measure(source: str | Path, config, *, log: Logger = _noop) -> SpeedReport:
                 text = " ".join(s.text for s in transcript.segments).strip()
                 report.sample_text = text[:200]
                 report.sample_lines = len(transcript.segments)
+                report.no_speech = looks_like_no_speech(text)
 
     report.load_seconds, report.seconds_per_minute = _solve(report.measured)
     report.ok = report.seconds_per_minute > 0

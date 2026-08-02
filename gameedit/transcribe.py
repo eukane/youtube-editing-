@@ -41,6 +41,21 @@ def _module_available(name: str) -> bool:
         return False
 
 
+def resolve_threads(raw) -> int:
+    """whisper.cpp 에 넘길 스레드 수.
+
+        0 이상  그대로 (0 이면 whisper.cpp 기본값 = 보통 4)
+        음수    코어 수에서 그만큼 뺀다 (편집기·브라우저가 쓸 여유를 남긴다)
+    """
+    try:
+        raw = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+    if raw >= 0:
+        return raw
+    return max(1, (os.cpu_count() or 2) + raw)
+
+
 def find_whisper_cpp(explicit: str = "") -> str | None:
     """whisper.cpp 실행 파일 찾기."""
     for candidate in (explicit, os.environ.get("GAMEEDIT_WHISPER_CPP", "")):
@@ -238,7 +253,9 @@ def _whisper_cpp(audio_path, options: dict, log: Logger) -> Transcript:
         language = options.get("language") or ""
         if language:
             cmd += ["-l", language]
-        threads = int(options.get("threads", 0) or 0)
+        # whisper.cpp 는 기본이 4스레드다. 8코어 기기에서 절반만 쓰는 셈이라
+        # 그냥 두면 두 배 가까이 손해다. 음수면 그만큼 코어를 남긴다.
+        threads = resolve_threads(options.get("threads", 0))
         if threads:
             cmd += ["-t", str(threads)]
 

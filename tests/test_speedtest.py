@@ -123,3 +123,57 @@ def test_report_dict_has_what_the_screen_needs():
     assert data["predicted_seconds"] == pytest.approx(308.0)
     assert data["predicted_hour_seconds"] == pytest.approx(1808.0)
     assert "약 5분" in data["summary"]
+
+
+# ------------------------------------------ 조용한 구간을 재면 안 된다
+
+@pytest.mark.parametrize("text,expect", [
+    ("[몇일이 없음] [몇일이 없음]", True),          # 실제로 나온 값
+    ("[음악]", True),
+    ("", True),
+    ("그래 그래 그래 그래 그래", True),              # 같은 말 반복 = 환각
+    ("뭐 이러고 있어요? 하다보는데 어 재밌는데", False),
+    ("아니 이게 왜 죽어 진짜", False),
+])
+def test_detects_hallucinated_transcript(text, expect):
+    """말이 없으면 whisper 가 지어낸다. 그걸 그대로 보여 주면 모델이
+    고장난 줄 안다. 실제로 사용자가 그렇게 오해했다."""
+    from gameedit.speedtest import looks_like_no_speech
+
+    assert looks_like_no_speech(text) is expect
+
+
+def test_sample_window_follows_the_talking_point():
+    """말이 있는 지점을 주면 거기서 잰다."""
+    from gameedit.speedtest import _sample_windows
+
+    (_s0, _l0), (long_start, long_len) = _sample_windows(600.0, center=420.0)
+    assert long_start == pytest.approx(420.0)
+    assert long_start + long_len <= 600.0
+
+
+def test_sample_window_clamps_to_the_end():
+    from gameedit.speedtest import _sample_windows
+
+    for start, length in _sample_windows(60.0, center=59.0):
+        assert start + length <= 60.0 + 0.001
+
+
+def test_whisper_threads_leave_room_for_the_rest():
+    """whisper.cpp 기본은 4스레드. 8코어에서 절반만 쓰면 두 배 손해다."""
+    import os
+    from gameedit.transcribe import resolve_threads
+
+    cores = os.cpu_count() or 2
+    assert resolve_threads(0) == 0              # 0 이면 whisper.cpp 기본값
+    assert resolve_threads(6) == 6
+    assert resolve_threads(-2) == max(1, cores - 2)
+    assert resolve_threads(-999) == 1           # 코어보다 많이 빼도 최소 1
+    assert resolve_threads("이상한값") == 0
+
+
+def test_phone_profile_uses_more_cores_for_subtitles():
+    from gameedit.config import Config
+
+    phone = Config().with_profile("phone")
+    assert phone.get("transcribe.threads") == -2
