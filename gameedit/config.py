@@ -251,7 +251,9 @@ PROFILES: dict[str, dict] = {
         },
         # whisper.cpp 기본값(4스레드)은 8코어 기기에서 절반만 쓰는 셈이다.
         # 두 코어만 남기고 나머지를 다 쓴다.
-        "transcribe": {"model": "base", "compute_type": "int8", "threads": -2},
+        # 크기를 박아 두면 사용자가 더 좋은 모델을 받아도 계속 작은 걸 쓴다.
+        # auto = 메모리에 들어가는 것 중 제일 큰 것.
+        "transcribe": {"model": "auto", "compute_type": "int8", "threads": -2},
         "render": {
             "preset": "veryfast", "crf": 26, "audio_bitrate": "128k",
             # 폰·태블릿에서는 편집기와 브라우저가 같은 기기에 있다. 코어를

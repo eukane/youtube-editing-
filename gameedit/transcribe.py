@@ -87,8 +87,31 @@ def is_real_model(path: Path) -> bool:
         return False
 
 
+# 모델을 올리는 데 필요한 램은 파일 크기의 약 1.35배 + 계산 버퍼.
+MODEL_RAM_FACTOR = 1.35
+MODEL_RAM_OVERHEAD_MB = 180.0
+# 남은 메모리의 이 비율까지만 쓴다. 꽉 채우면 편집 단계에서 죽는다.
+MEMORY_HEADROOM = 0.6
+
+
+def model_fits(path: Path, available_mb: float) -> bool:
+    """이 모델을 지금 메모리로 올릴 수 있는지. 못 재면 그냥 된다고 본다."""
+    if available_mb <= 0:
+        return True
+    try:
+        need = path.stat().st_size / (1024 * 1024) * MODEL_RAM_FACTOR + MODEL_RAM_OVERHEAD_MB
+    except OSError:
+        return False
+    return need <= available_mb * MEMORY_HEADROOM
+
+
 def find_whisper_model(explicit: str = "", size: str = "") -> str | None:
-    """whisper.cpp 용 ggml 모델 파일(.bin) 찾기."""
+    """whisper.cpp 용 ggml 모델 파일(.bin) 찾기.
+
+    size 가 비었거나 'auto' 면 **메모리에 들어가는 것 중 제일 큰 모델**을
+    고른다. 크기를 박아 두면 사용자가 더 좋은 모델을 받아도 프로그램이
+    계속 작은 걸 쓴다 — 실제로 small 을 받아 놓고도 base 가 돌았다.
+    """
     for candidate in (explicit, os.environ.get("GAMEEDIT_WHISPER_MODEL", "")):
         if candidate and Path(candidate).expanduser().exists():
             return str(Path(candidate).expanduser())   # 직접 지정한 건 그대로 믿는다
@@ -100,11 +123,21 @@ def find_whisper_model(explicit: str = "", size: str = "") -> str | None:
             found.extend(sorted(p for p in path.glob("*.bin") if is_real_model(p)))
     if not found:
         return None
-    if size:  # 설정한 크기(tiny/base/small…)와 이름이 맞는 것 우선
+
+    size = (size or "").strip().lower()
+    if size and size != "auto":       # 크기를 콕 집었으면 그걸 따른다
         for model in found:
-            if size.lower() in model.name.lower():
+            if size in model.name.lower():
                 return str(model)
-    return str(found[0])
+
+    from .system import available_memory_mb
+    available = available_memory_mb()
+    # 큰 것부터 보면서 메모리에 들어가는 첫 번째를 쓴다
+    for model in sorted(found, key=lambda p: p.stat().st_size, reverse=True):
+        if model_fits(model, available):
+            return str(model)
+    # 전부 빠듯하면 제일 작은 것이라도 (아예 못 하는 것보다 낫다)
+    return str(min(found, key=lambda p: p.stat().st_size))
 
 
 def whisper_cpp_ready(options: dict | None = None) -> bool:

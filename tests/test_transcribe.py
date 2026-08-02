@@ -206,3 +206,75 @@ def test_real_model_check(tmp_path):
     big.write_bytes(b"\x00" * (60 * 1024 * 1024))
     assert is_real_model(big)
     assert not is_real_model(tmp_path / "없는파일.bin")
+
+
+# ------------------------------- 받아 둔 것 중 제일 좋은 모델을 쓴다
+
+def _models(tmp_path, **sizes_mb):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    for name, mb in sizes_mb.items():
+        (tmp_path / f"ggml-{name}.bin").write_bytes(b"\x00" * int(mb * 1024 * 1024))
+    return tmp_path
+
+
+def test_picks_the_biggest_model_that_fits(tmp_path, monkeypatch):
+    """small 을 받아 놓고도 base 가 돌던 문제. 크기를 박아 두면 안 된다."""
+    from gameedit import transcribe as tr
+
+    folder = _models(tmp_path / "m", tiny=75, base=148, small=466)
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(folder),))
+    monkeypatch.setattr("gameedit.system.available_memory_mb", lambda: 2000.0)
+
+    assert tr.find_whisper_model(size="auto").endswith("ggml-small.bin")
+    assert tr.find_whisper_model().endswith("ggml-small.bin")
+
+
+def test_skips_models_that_do_not_fit_in_memory(tmp_path, monkeypatch):
+    """램이 모자라면 느린 게 아니라 그냥 죽는다."""
+    from gameedit import transcribe as tr
+
+    folder = _models(tmp_path / "m", base=148, small=466, medium=1500)
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(folder),))
+    monkeypatch.setattr("gameedit.system.available_memory_mb", lambda: 900.0)
+
+    # 900MB 의 60% = 540MB 까지. small(466*1.35+180=809MB) 은 못 들어간다
+    assert tr.find_whisper_model(size="auto").endswith("ggml-base.bin")
+
+
+def test_explicit_size_still_wins(tmp_path, monkeypatch):
+    """크기를 콕 집으면 그걸 따른다. 사용자가 알고 고른 것이다."""
+    from gameedit import transcribe as tr
+
+    folder = _models(tmp_path / "m", base=148, small=466)
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(folder),))
+    monkeypatch.setattr("gameedit.system.available_memory_mb", lambda: 4000.0)
+
+    assert tr.find_whisper_model(size="base").endswith("ggml-base.bin")
+
+
+def test_falls_back_to_the_smallest_when_nothing_fits(tmp_path, monkeypatch):
+    """전부 빠듯해도 아예 못 하는 것보다는 낫다."""
+    from gameedit import transcribe as tr
+
+    folder = _models(tmp_path / "m", base=148, small=466)
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(folder),))
+    monkeypatch.setattr("gameedit.system.available_memory_mb", lambda: 100.0)
+
+    assert tr.find_whisper_model(size="auto").endswith("ggml-base.bin")
+
+
+def test_unknown_memory_does_not_block_the_big_model(tmp_path, monkeypatch):
+    """맥·윈도우처럼 /proc/meminfo 가 없는 환경에서 작은 걸 쓰면 손해다."""
+    from gameedit import transcribe as tr
+
+    folder = _models(tmp_path / "m", base=148, small=466)
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(folder),))
+    monkeypatch.setattr("gameedit.system.available_memory_mb", lambda: 0.0)
+
+    assert tr.find_whisper_model(size="auto").endswith("ggml-small.bin")
+
+
+def test_phone_profile_lets_the_program_choose():
+    from gameedit.config import Config
+
+    assert Config().with_profile("phone").get("transcribe.model") == "auto"
