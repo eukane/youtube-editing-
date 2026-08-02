@@ -571,7 +571,12 @@ function showSpeed(r){
   if (r.predicted_seconds > 0)
     rows.push(`<b>이 영상: 약 ${fmtWait(r.predicted_seconds)}</b>`);
   rows.push(`1시간짜리면 약 ${fmtWait(r.predicted_hour_seconds)}`);
-  rows.push(`오디오 1분당 ${Math.round(r.seconds_per_minute)}초 · ${esc(r.model || r.backend)}`);
+  rows.push(`오디오 1분당 ${Math.round(r.seconds_per_minute)}초 · <b>${esc(r.model || r.backend)}</b>`);
+  // 더 좋은 모델을 받아 놓고도 계속 작은 게 돌면 사용자는 아무 일도
+  // 안 일어난 줄 안다. 뭐가 깔려 있고 왜 이걸 골랐는지 밝힌다.
+  if (r.models_found && r.models_found.length)
+    rows.push(`받아 둔 모델: ${r.models_found.map(esc).join(', ')}`);
+  if (r.model_note) rows.push(esc(r.model_note));
   if (r.memory_verdict && r.memory_verdict !== 'ok')
     rows.push(`⚠ ${esc(r.memory_note)}`);
   if (r.no_speech)

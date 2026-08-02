@@ -77,6 +77,10 @@ class SpeedReport:
     memory_available_mb: float = 0.0
     memory_needed_mb: float = 0.0
     memory_verdict: str = "unknown"      # ok | tight | impossible | unknown
+    # 받아 둔 모델 전부와, 왜 이걸 골랐는지. 조용히 작은 걸 쓰면 사용자는
+    # 더 좋은 모델을 받아 놓고도 아무 일이 안 일어난 줄 안다.
+    models_found: list[str] = field(default_factory=list)
+    model_note: str = ""
 
     source_duration: float = 0.0
     no_speech: bool = False              # 인식 결과가 '말이 없어서 지어낸 것' 같은지
@@ -103,6 +107,8 @@ class SpeedReport:
             "memory_available_mb": round(self.memory_available_mb),
             "memory_needed_mb": round(self.memory_needed_mb),
             "memory_verdict": self.memory_verdict,
+            "models_found": self.models_found,
+            "model_note": self.model_note,
             "memory_note": self.memory_note,
             "source_duration": round(self.source_duration, 1),
             "predicted_seconds": round(self.predict(self.source_duration), 1),
@@ -290,6 +296,42 @@ def _solve(measured: list[tuple[float, float]]) -> tuple[float, float]:
     return load, rate * 60.0
 
 
+MODEL_QUALITY = ("tiny", "base", "small", "medium", "large")
+
+
+def describe_model_choice(chosen: str | None) -> tuple[list[str], str]:
+    """받아 둔 모델 목록과, 왜 이걸 골랐는지 한 줄 설명.
+
+    더 좋은 모델을 받아 놓고도 프로그램이 계속 작은 걸 쓰면 사용자는 아무
+    일도 안 일어난 줄 안다. 실제로 그래서 두 번을 헛돌았다.
+    """
+    from .transcribe import installed_models, model_fits
+
+    found = installed_models()
+    names = [f"{p.name} ({p.stat().st_size // 1024 // 1024}MB)" for p in found]
+    if not found:
+        return names, "받아 둔 모델이 없습니다."
+    if not chosen:
+        return names, "쓸 수 있는 모델을 못 찾았습니다."
+
+    picked = Path(chosen)
+    bigger = [p for p in found if p.stat().st_size > picked.stat().st_size]
+    if not bigger:
+        rank = next((i for i, q in enumerate(MODEL_QUALITY) if q in picked.name.lower()), -1)
+        if 0 <= rank < len(MODEL_QUALITY) - 1:
+            nxt = MODEL_QUALITY[rank + 1]
+            return names, (f"받아 둔 것 중 제일 큰 모델입니다. 정확도를 더 올리려면 "
+                           f"`cd ~/gameedit && bash install-subtitles.sh {nxt}`")
+        return names, "받아 둔 것 중 제일 큰 모델입니다."
+
+    available = available_memory_mb()
+    blocked = [p.name for p in bigger if not model_fits(p, available)]
+    if blocked:
+        return names, (f"더 큰 모델({', '.join(blocked)})이 있지만 지금 메모리로는 "
+                       f"못 올립니다. 다른 앱을 닫고 다시 재보세요.")
+    return names, "더 큰 모델이 있는데 설정이 이 크기를 지정하고 있습니다."
+
+
 def measure(source: str | Path, config, *, log: Logger = _noop) -> SpeedReport:
     """영상에서 짧은 조각 두 개를 잘라 실제로 자막을 만들어 보고 속도를 잰다."""
     options = dict(config.section("transcribe"))
@@ -316,6 +358,7 @@ def measure(source: str | Path, config, *, log: Logger = _noop) -> SpeedReport:
                                     str(options.get("model", "")))
     if model_path:
         report.model = Path(model_path).name
+    report.models_found, report.model_note = describe_model_choice(model_path)
     report.memory_available_mb = available_memory_mb()
     report.memory_needed_mb = model_memory_mb(str(options.get("model", "")), model_path)
     report.memory_verdict = memory_verdict(report.memory_needed_mb, report.memory_available_mb)

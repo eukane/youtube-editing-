@@ -105,6 +105,16 @@ def model_fits(path: Path, available_mb: float) -> bool:
     return need <= available_mb * MEMORY_HEADROOM
 
 
+def installed_models() -> list[Path]:
+    """받아 둔 진짜 모델 전부 (큰 것부터)."""
+    found: list[Path] = []
+    for directory in WHISPER_MODEL_DIRS:
+        path = Path(directory).expanduser()
+        if path.is_dir():
+            found.extend(p for p in path.glob("*.bin") if is_real_model(p))
+    return sorted(found, key=lambda p: p.stat().st_size, reverse=True)
+
+
 def find_whisper_model(explicit: str = "", size: str = "") -> str | None:
     """whisper.cpp 용 ggml 모델 파일(.bin) 찾기.
 

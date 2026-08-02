@@ -177,3 +177,56 @@ def test_phone_profile_uses_more_cores_for_subtitles():
 
     phone = Config().with_profile("phone")
     assert phone.get("transcribe.threads") == -2
+
+
+# ------------------------- 받아 둔 모델과 고른 이유를 밝힌다
+
+def _install(folder, **sizes_mb):
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, mb in sizes_mb.items():
+        (folder / f"ggml-{name}.bin").write_bytes(b"\x00" * int(mb * 1024 * 1024))
+    return folder
+
+
+def test_reports_installed_models_and_why_this_one(tmp_path, monkeypatch):
+    """더 좋은 모델을 받아 놓고도 계속 작은 게 돌면 사용자는 아무 일도
+    안 일어난 줄 안다. 실제로 두 번을 헛돌았다."""
+    from gameedit import transcribe as tr
+    from gameedit.speedtest import describe_model_choice
+
+    folder = _install(tmp_path / "m", base=148)
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(folder),))
+    monkeypatch.setattr("gameedit.system.available_memory_mb", lambda: 2000.0)
+
+    names, note = describe_model_choice(str(folder / "ggml-base.bin"))
+    assert names == ["ggml-base.bin (148MB)"]
+    assert "install-subtitles.sh small" in note      # 다음 단계를 알려 준다
+
+
+def test_reports_when_a_bigger_model_does_not_fit(tmp_path, monkeypatch):
+    from gameedit import transcribe as tr
+    from gameedit.speedtest import describe_model_choice
+
+    folder = _install(tmp_path / "m", base=148, small=466)
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(folder),))
+    # speedtest 는 import 시점에 이름을 묶으므로 그쪽을 갈아 끼워야 한다
+    monkeypatch.setattr("gameedit.speedtest.available_memory_mb", lambda: 900.0)
+
+    _names, note = describe_model_choice(str(folder / "ggml-base.bin"))
+    assert "ggml-small.bin" in note and "메모리" in note
+
+
+def test_reports_when_nothing_is_installed(tmp_path, monkeypatch):
+    from gameedit import transcribe as tr
+    from gameedit.speedtest import describe_model_choice
+
+    monkeypatch.setattr(tr, "WHISPER_MODEL_DIRS", (str(tmp_path / "없음"),))
+    names, note = describe_model_choice(None)
+    assert names == [] and "없습니다" in note
+
+
+def test_page_shows_the_model_list():
+    from gameedit.webui import PAGE
+
+    assert "models_found" in PAGE and "model_note" in PAGE
+    assert "받아 둔 모델" in PAGE
