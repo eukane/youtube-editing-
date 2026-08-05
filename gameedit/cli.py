@@ -15,6 +15,7 @@ from .media import FFmpegError, find_binary, format_timecode
 from .memes import (AUDIO_EXTS, BUILTIN_PACK_DIR, IMAGE_EXTS, VIDEO_EXTS, load_packs,
                     missing_assets)
 from .models import Analysis, EditPlan, analysis_from_dict, load_json, save_json
+from .cost import Ledger
 from .plan import build_plan, load_plan
 from .render import render, resolve_output_size
 from .srt import write_srt
@@ -233,6 +234,22 @@ def cmd_analyze(args) -> int:
     return 0
 
 
+def cmd_framecheck(args) -> int:
+    """화면 보기를 붙이기 전에, 이 기기에서 될 일인지 실제로 재 본다."""
+    from .framecheck import measure
+
+    every = max(0.2, float(getattr(args, "every", 1.0) or 1.0))
+    log(f"영상 가운데에서 {every:g}초에 한 장씩 뽑아 봅니다… (30초쯤 걸립니다)")
+    report = measure(args.video, every=every)
+    log("")
+    for line in report.advice(every=every):
+        log(f"  {line}")
+    if report.ok:
+        log("")
+        log(f"  (잰 값: {report.sample_seconds:.0f}초치를 {report.sample_took:.1f}초에 뽑음)")
+    return 0 if report.ok else 1
+
+
 def cmd_speedtest(args) -> int:
     """이 기기에서 자막이 얼마나 걸릴지 실제로 재 본다."""
     from .speedtest import human_time, measure
@@ -270,14 +287,53 @@ def cmd_plan(args) -> int:
     config = load_config(args)
     work_dir = resolve_work_dir(config, args, getattr(args, "video", None))
     analysis = load_analysis(work_dir)
-    plan = build_plan(analysis, config)
+    ledger = new_ledger(config)
+    plan = build_plan(analysis, config, ledger=ledger, log=log)
     outputs = write_plan_outputs(plan, analysis, config, work_dir)
     _print_plan_summary(plan, outputs)
+    _print_cost(ledger)
     return 0
+
+
+def new_ledger(config) -> Ledger:
+    """이번 작업의 지출 내역서. 상한은 설정에서 가져온다."""
+    return Ledger(limit_krw=float(config.get("ai.limit_krw", 0.0) or 0.0))
+
+
+def _print_cost(ledger: Ledger) -> None:
+    """돈이 나갔으면 얼마가 어디에 나갔는지 반드시 보여 준다."""
+    if not ledger.steps:
+        return
+    log("")
+    log("[AI 사용 내역]")
+    for line in ledger.report_lines():
+        log(f"  {line}")
+
+
+def _print_ai_summary(plan: EditPlan) -> None:
+    """AI 를 썼는지, 못 썼으면 왜인지.
+
+    켰는데 결과가 예전과 똑같으면 사용자는 이유를 알 수가 없다. 실제로
+    키가 없거나 상한에 걸려서 조용히 규칙 기반으로 간 경우가 있었다.
+    """
+    info = plan.meta.get("ai") or {}
+    if not info:
+        return
+    if info.get("used"):
+        log(f"🤖 AI({info.get('model')})가 구간 {info.get('clip_count', 0)}개 · "
+            f"밈 {info.get('meme_count', 0)}개를 정했습니다")
+        if info.get("title"):
+            log(f"   제목 후보: {info['title']}")
+        for reason in (info.get("reasons") or [])[:6]:
+            log(f"   · {reason}")
+    elif info.get("error") and info["error"] != "AI 편집이 꺼져 있습니다":
+        log(f"⚠ AI 를 쓰지 못했습니다 — {info['error']}")
+        log("  (소리·대사 기준으로 편집했습니다)")
 
 
 def _print_plan_summary(plan: EditPlan, outputs: dict[str, Path]) -> None:
     log("")
+    _print_ai_summary(plan)
     if plan.meta.get("fallback"):
         log("⚠ 소리·대사에서 하이라이트 신호를 찾지 못해 균등 간격으로 잘랐습니다.")
         log("  (마이크 없이 녹화했거나, 영상이 짧거나, 전체가 조용한 경우입니다)")
@@ -370,9 +426,11 @@ def cmd_auto(args) -> int:
         save_json(analysis, analysis_path)
 
     log("\n[편집 계획 수립]")
-    plan = build_plan(analysis, config)
+    ledger = new_ledger(config)
+    plan = build_plan(analysis, config, ledger=ledger, log=log)
     outputs = write_plan_outputs(plan, analysis, config, work_dir)
     _print_plan_summary(plan, outputs)
+    _print_cost(ledger)
 
     if args.plan_only:
         log("\n--plan-only: 렌더링은 건너뜁니다. 확인 후 `gameedit render` 를 실행하세요.")
@@ -644,6 +702,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("video")
     _add_common(p)
     p.set_defaults(func=cmd_speedtest)
+
+    p = sub.add_parser("framecheck", help="AI 가 화면을 볼 때 이 기기가 견딜지 재보기")
+    p.add_argument("video")
+    p.add_argument("--every", type=float, default=1.0, help="몇 초에 한 장 (기본 1초)")
+    _add_common(p)
+    p.set_defaults(func=cmd_framecheck)
 
     p = sub.add_parser("plan", help="분석 결과로 편집 계획 만들기")
     p.add_argument("video", nargs="?", help="작업 폴더를 찾기 위한 원본 파일명 (선택)")

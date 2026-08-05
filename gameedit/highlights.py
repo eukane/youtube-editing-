@@ -197,9 +197,13 @@ def select_ranges(grid: ScoreGrid, cfg: dict) -> list[tuple[float, float, float]
     return chosen
 
 
-def _snap_to_words(start: float, end: float, word_bounds: list[tuple[float, float]],
-                   window: float) -> tuple[float, float]:
-    """말이 잘리지 않도록 컷 지점을 단어 경계로 밀어준다."""
+def snap_clip_edges(start: float, end: float, word_bounds: list[tuple[float, float]],
+                    window: float) -> tuple[float, float]:
+    """말이 잘리지 않도록 컷 지점을 단어 경계로 밀어준다.
+
+    규칙 기반과 AI 가 같이 쓴다. AI 는 "3분 12초부터" 처럼 초 단위로
+    답하기 때문에 이걸 안 거치면 말 중간에서 시작한다.
+    """
     if not word_bounds:
         return start, end
     # 시작점이 어떤 단어의 중간이라면 그 단어의 시작으로 당긴다
@@ -312,6 +316,43 @@ def fallback_clips(duration: float, cfg: dict) -> list[Clip]:
 TARGET_TOLERANCE = 0.10
 
 
+def fit_to_target(clips: list[Clip], cfg: dict) -> list[Clip]:
+    """점수 높은 것부터 목표 길이만큼만 남긴다 (수동 지정 구간은 항상 유지).
+
+    예전에는 `총합 >= 목표` 가 될 때까지 담기만 해서, 마지막 한 클립이
+    통째로 목표를 넘겨 버렸다. 실측으로 목표 20초에 29초(+46%), 30초에
+    37초(+24%) 가 나왔다. 화면에서 "3분" 을 고른 사람은 3분짜리를 기대한다.
+
+    규칙 기반과 AI 가 **같은 함수**를 쓴다. 한쪽만 고치면 AI 를 켰을 때만
+    길이가 어긋나는, 찾기 어려운 차이가 생긴다.
+    """
+    target = float(cfg.get("target_duration", 480.0))
+    min_clip = float(cfg.get("min_clip", 6.0))
+
+    ordered = sorted(clips, key=lambda c: (c.reason == "manual", c.score), reverse=True)
+    allowance = target * (1.0 + TARGET_TOLERANCE)
+    kept: list[Clip] = []
+    total = 0.0
+    for clip in ordered:
+        if clip.reason == "manual" or not kept:
+            kept.append(clip)
+            total += clip.duration
+            continue
+        room = allowance - total
+        if room <= 0:
+            continue
+        if clip.duration > room:
+            # 통째로 버리면 안 된다. 실측에서 제일 센 장면이 0.05초 차이로
+            # 빠졌다. 남은 자리에 맞게 뒤를 조금 잘라서 넣는다.
+            if room < min_clip:
+                continue
+            clip.source_end = round(clip.source_start + room, 3)
+        kept.append(clip)
+        total += clip.duration
+    kept.sort(key=lambda c: c.source_start)
+    return kept
+
+
 def build_clips(analysis: Analysis, cfg: dict) -> list[Clip]:
     grid = build_score_grid(analysis, cfg)
     ranges = select_ranges(grid, cfg)
@@ -326,7 +367,6 @@ def build_clips(analysis: Analysis, cfg: dict) -> list[Clip]:
     merge_gap = float(cfg.get("merge_gap", 3.0))
     min_clip = float(cfg.get("min_clip", 6.0))
     max_clip = float(cfg.get("max_clip", 45.0))
-    target = float(cfg.get("target_duration", 480.0))
 
     padded: list[tuple[float, float]] = []
     for start, end, _score in ranges:
@@ -368,7 +408,7 @@ def build_clips(analysis: Analysis, cfg: dict) -> list[Clip]:
         if drop_tail:
             start, end = _trim_silence_edges(start, end, silences)
         if snap:
-            start, end = _snap_to_words(start, end, word_bounds, snap_window)
+            start, end = snap_clip_edges(start, end, word_bounds, snap_window)
         start = max(0.0, start)
         end = min(duration, end)
         if end - start < min_clip * 0.6:
@@ -378,34 +418,7 @@ def build_clips(analysis: Analysis, cfg: dict) -> list[Clip]:
         clips.append(Clip(source_start=round(start, 3), source_end=round(end, 3),
                           score=round(score, 4), reason="manual" if pinned else "auto"))
 
-    # 목표 길이에 맞춰 점수 높은 것부터 담는다 (수동 지정 구간은 항상 유지).
-    #
-    # 예전에는 `총합 >= 목표` 가 될 때까지 담기만 해서, 마지막 한 클립이
-    # 통째로 목표를 넘겨 버렸다. 실측으로 목표 20초에 29초(+46%), 30초에
-    # 37초(+24%) 가 나왔다. 화면에서 "3분" 을 고른 사람은 3분짜리를 기대한다.
-    # 넘길 것 같으면 그 클립을 건너뛰고, 뒤의 더 짧은 클립으로 남은 자리를
-    # 채운다. 점수 순으로 보고 있으므로 건너뛴 자리는 조금 덜 센 장면이 메운다.
-    clips.sort(key=lambda c: (c.reason == "manual", c.score), reverse=True)
-    allowance = target * (1.0 + TARGET_TOLERANCE)
-    kept: list[Clip] = []
-    total = 0.0
-    for clip in clips:
-        if clip.reason == "manual" or not kept:
-            kept.append(clip)
-            total += clip.duration
-            continue
-        room = allowance - total
-        if room <= 0:
-            continue
-        if clip.duration > room:
-            # 통째로 버리면 안 된다. 실측에서 제일 센 장면이 0.05초 차이로
-            # 빠졌다. 남은 자리에 맞게 뒤를 조금 잘라서 넣는다.
-            if room < min_clip:
-                continue
-            clip.source_end = round(clip.source_start + room, 3)
-        kept.append(clip)
-        total += clip.duration
-    kept.sort(key=lambda c: c.source_start)
+    kept = fit_to_target(clips, cfg)
 
     if not kept:
         return fallback_clips(duration, cfg)

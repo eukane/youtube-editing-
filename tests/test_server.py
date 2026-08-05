@@ -935,3 +935,71 @@ def test_removing_every_clip_is_refused(server, tmp_path):
 
     code, body = post_json(base, f"/api/jobs/{job.id}/replan", {"removed_clips": [0, 1]})
     assert code == 400 and "전부" in body["error"]
+
+
+# ------------------------------------------------- AI 스위치 (돈이 나가는 자리)
+
+def test_info_never_leaks_the_api_key(server, monkeypatch, tmp_path):
+    """이 응답은 같은 와이파이의 아무 기기나 볼 수 있다.
+
+    키가 통째로 나가면 남이 내 잔액을 쓴다. 있는지 여부와 가려진 형태만.
+    """
+    secret = "sk-ant-api03-SECRET1234567890abcdefghijklmnop"
+    monkeypatch.setattr("gameedit.brain.load_key", lambda explicit="": secret)
+
+    base, _, _ = server
+    ai = get_json(f"{base}/api/info")["ai"]
+    assert ai["has_key"] is True
+    assert secret not in json.dumps(ai, ensure_ascii=False)
+    assert "SECRET" not in ai["key_hint"]
+
+
+def test_info_reports_the_price_the_screen_needs(server):
+    base, _, _ = server
+    ai = get_json(f"{base}/api/info")["ai"]
+    assert ai["krw_per_hour"] > 0
+    assert ai["model"]
+    assert ai["enabled"] is False          # 기본은 꺼짐
+
+
+def test_ai_is_off_unless_the_screen_turns_it_on(server, tmp_path):
+    """설정 파일에 켜 뒀더라도 화면에서 안 켰으면 안 켠다.
+
+    안 켠 줄 알았는데 돈이 나가는 게 제일 나쁘다.
+    """
+    from gameedit.jobs import Job
+
+    base, manager, _ = server
+    manager.config.set("ai.enabled", True)
+    job = Job(id="a" * 10, source="/tmp/a.mp4", title="a", options={"ai": False})
+    assert manager._job_config(job).get("ai.enabled") is False
+
+    job.options["ai"] = True
+    assert manager._job_config(job).get("ai.enabled") is True
+
+
+def test_spending_cap_from_the_screen_is_checked(server):
+    """상한이 잘못 오면 돈이 나간다. 설정값을 그대로 둬야 한다."""
+    from gameedit.jobs import Job, resolve_limit
+
+    base, manager, _ = server
+    manager.config.set("ai.limit_krw", 500.0)
+
+    for bad in ("삼천원", None, 0, -100, float("nan"), 1e30, 5.0):
+        assert resolve_limit(bad) is None, bad
+        job = Job(id="b" * 10, source="/tmp/a.mp4", title="a",
+                  options={"ai": True, "ai_limit_krw": bad})
+        assert manager._job_config(job).get("ai.limit_krw") == 500.0
+
+    job = Job(id="c" * 10, source="/tmp/a.mp4", title="a",
+              options={"ai": True, "ai_limit_krw": 3000})
+    assert manager._job_config(job).get("ai.limit_krw") == 3000.0
+
+
+def test_screen_has_the_ai_switch_and_warns_about_money():
+    from gameedit.webui import PAGE
+
+    assert 'id="sw-ai"' in PAGE
+    assert "돈이 듭니다" in PAGE          # 켜기 전에 알아야 한다
+    assert "~/.gameedit-key" in PAGE      # 키 넣는 법이 화면에 있어야 한다
+    assert "krw_per_hour" in PAGE         # 예상 금액을 서버 단가로 낸다

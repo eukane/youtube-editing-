@@ -220,6 +220,30 @@ _BODY = r"""
       </div>
     </div>
 
+    <h2>AI 로 편집하기</h2>
+    <div class="card">
+      <div class="row">
+        <div style="flex:1">
+          <div class="label">AI 가 대사를 읽고 고르기 <b style="color:var(--warn)">· 돈이 듭니다</b></div>
+          <div class="sub" id="ai-sub">소리 크기 대신 <b>내용</b>을 보고 고릅니다.
+            왜 골랐는지도 알려 줍니다</div>
+        </div>
+        <div class="switch" id="sw-ai" onclick="toggleAi(this)"><i></i></div>
+      </div>
+      <div id="ai-extra" style="display:none">
+        <div id="ai-cost" class="sub" style="margin:2px 2px 10px;padding:10px 12px;
+             border-radius:10px;background:#16233a"></div>
+        <div class="label" style="margin:0 2px 6px">이 영상에 쓸 수 있는 최대 금액</div>
+        <div class="chips" id="ai-limits"></div>
+        <div class="sub muted" style="margin:8px 2px 0">
+          넘을 것 같으면 AI 를 <b>부르지 않고</b> 소리 기준으로 편집합니다.
+          AI 가 실패해도 편집은 그대로 됩니다.
+        </div>
+      </div>
+      <div id="ai-nokey" class="muted" style="display:none;margin:8px 2px 0;
+           padding:10px 12px;border-radius:10px;background:#3a2a10;color:#f0c674"></div>
+    </div>
+
     <h2>얼마나 걸릴까</h2>
     <div class="card">
       <div class="row">
@@ -247,6 +271,8 @@ _BODY = r"""
       <div id="job-step" style="font-size:16px">준비 중…</div>
       <div class="bar"><i id="job-bar"></i></div>
       <div class="muted" id="job-sum"></div>
+      <div id="job-ai" style="display:none;margin-top:12px;padding:12px;
+           border-radius:10px;font-size:13px;line-height:1.7"></div>
     </div>
     <div id="job-retry" style="display:none">
       <div class="card">
@@ -290,7 +316,11 @@ _JS = r"""const KEY = (new URLSearchParams(location.search).get('k')) ||
 if (KEY) localStorage.setItem('gameedit_key', KEY);
 
 let state = {view:'home', file:null, job:null, plan:null,
-             removed:new Set(), edits:{}, target:10, timer:null};
+             removed:new Set(), edits:{}, target:10, timer:null, aiLimit:500};
+
+/* 서버가 /api/info 로 채워 준다. 단가를 화면에 박아 두면 값이 바뀔 때
+   화면만 옛날 숫자를 보여 준다. */
+let AI = {enabled:false, has_key:false, model:'', krw_per_hour:0};
 
 const $ = (id) => document.getElementById(id);
 
@@ -371,6 +401,49 @@ function updateSubWarning(){
 
 function toggleSub(el){ toggle(el); updateSubWarning(); }
 
+/* ---------------- AI ---------------- */
+const AI_LIMITS = [300, 500, 1000, 3000];
+
+function aiEstimate(){
+  /* 서버가 알려 준 단가로 이 영상의 예상 금액을 낸다. 시작하기 전에
+     얼마 나갈지 모르면 켤 수가 없다. */
+  const dur = (state.file && state.file.duration) || 0;
+  const per = (AI && AI.krw_per_hour) || 0;
+  if (!dur || !per) return 0;
+  return Math.round(dur / 3600 * per);
+}
+
+function updateAi(){
+  const on = $('sw-ai').classList.contains('on');
+  $('ai-extra').style.display = on ? 'block' : 'none';
+
+  const nokey = $('ai-nokey');
+  if (on && AI && !AI.has_key){
+    nokey.style.display = 'block';
+    nokey.innerHTML =
+      '⚠ <b>API 키가 없습니다.</b> 켜도 소리 기준으로 편집됩니다.<br>' +
+      'console.anthropic.com 에서 키를 만든 뒤 Termux 에 아래 두 줄을 치세요.<br>' +
+      '<code>echo "키" > ~/.gameedit-key</code><br>' +
+      '<code>chmod 600 ~/.gameedit-key</code>';
+  } else {
+    nokey.style.display = 'none';
+  }
+
+  const krw = aiEstimate();
+  $('ai-cost').innerHTML = krw
+    ? `이 영상 예상 <b>약 ${krw.toLocaleString()}원</b>` +
+      `<span class="muted"> · ${(AI && AI.model) || ''} · 대사만 읽음(화면은 안 봄)</span>`
+    : '영상을 고르면 예상 금액을 알려 드립니다.';
+
+  if (!state.aiLimit) state.aiLimit = AI_LIMITS[1];
+  $('ai-limits').innerHTML = AI_LIMITS.map(n =>
+    `<div class="chip ${n===state.aiLimit?'on':''}" onclick="setAiLimit(${n})">` +
+    `${n.toLocaleString()}원</div>`).join('');
+}
+
+function setAiLimit(n){ state.aiLimit = n; updateAi(); }
+function toggleAi(el){ toggle(el); updateAi(); }
+
 function toggleShorts(el){
   toggle(el);
   $('shorts-extra').style.display = el.classList.contains('on') ? 'block' : 'none';
@@ -405,6 +478,45 @@ function pick(input){
 }
 
 /* ---------------- 목록 ---------------- */
+function renderAiResult(j){
+  /* AI 를 썼으면 **왜 그렇게 골랐는지와 얼마가 나갔는지**를 보여 준다.
+     이게 없으면 돈만 나가고 뭐가 달라졌는지 알 수가 없다. */
+  const box = $('job-ai');
+  if (!box) return;
+  const ai = (j.summary && j.summary.ai) || {};
+  const cost = (j.summary && j.summary.cost) || {};
+  if (j.status !== 'done' || (!ai.used && !ai.error)){ box.style.display='none'; return; }
+  box.style.display = 'block';
+
+  if (!ai.used){
+    box.style.background = '#3a2a10'; box.style.color = '#f0c674';
+    box.innerHTML = `⚠ AI 를 쓰지 못했습니다 — ${esc(ai.error||'')}<br>` +
+                    '<span class="muted">소리·대사 기준으로 편집했습니다. 돈은 안 나갔습니다.</span>';
+    return;
+  }
+  box.style.background = '#16233a'; box.style.color = 'var(--text)';
+  const rows = [
+    `🤖 <b>${esc(ai.model||'AI')}</b> 가 구간 ${ai.clip_count||0}개 · 밈 ${ai.meme_count||0}개를 정했습니다`,
+  ];
+  if (cost.total_krw) rows.push(`<b>약 ${Number(cost.total_krw).toLocaleString()}원</b> 들었습니다`);
+  if (ai.title) rows.push(`제목 후보 — <i>${esc(ai.title)}</i>`);
+  if ((ai.reasons||[]).length){
+    rows.push('<span class="muted">왜 골랐는지</span>');
+    rows.push('<span class="muted">' +
+      ai.reasons.slice(0,8).map(r => '· ' + esc(r)).join('<br>') + '</span>');
+  }
+  box.innerHTML = rows.join('<br>');
+}
+
+async function loadInfo(){
+  /* 모델·단가·키 유무는 서버가 안다. 화면에 숫자를 박아 두면 설정을
+     바꿔도 화면만 옛날 값을 보여 준다. */
+  try{
+    const info = await api('/api/info');
+    if (info && info.ai) AI = info.ai;
+  } catch(e){ /* 못 받아도 편집은 된다 */ }
+}
+
 async function refresh(){
   try {
     const {files} = await api('/api/files');
@@ -489,6 +601,7 @@ function openOptions(file){
     $('sw-shorts').classList.contains('on') ? 'block' : 'none';
   state.speed = null;
   updateSubWarning();
+  updateAi();
   $('subs-name').textContent = '유튜브 자동자막·클로바노트 등에서 받은 .srt';
   state.style = state.style || '';
   $('styles').innerHTML = STYLES.map(([id,name]) =>
@@ -663,6 +776,8 @@ async function startJob(){
         style: state.style || '',
         subs: state.subs || '',
         wishes: state.wishes || '',
+        ai: $('sw-ai').classList.contains('on'),
+        ai_limit_krw: state.aiLimit || 0,
       })
     });
     openJob(job.id);
@@ -693,6 +808,7 @@ async function poll(){
     $('job-sum').textContent = j.status==='done' && j.summary.clips ?
       `${j.summary.source_duration_text} → ${j.summary.duration_text} · ` +
       `하이라이트 ${j.summary.clips}개 · 밈 ${j.summary.memes}개 · 자막 ${j.summary.subtitles}줄` : '';
+    renderAiResult(j);
     $('job-log').textContent = (j.log||[]).join('\n');
     $('job-log').scrollTop = 1e6;
 
@@ -779,7 +895,7 @@ async function replan(){
   $('action').disabled = false;
 }
 
-refresh();
+loadInfo().then(refresh);
 setInterval(() => { if (state.view === 'home') refresh(); }, 5000);"""
 
 # 서버는 PAGE 하나만 알면 된다.

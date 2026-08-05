@@ -352,3 +352,26 @@ def test_key_whitespace_is_trimmed(api_server):
     call_api("  sk-ant-abc \n", {"messages": []}, url=api_server["url"])
     head = {k.lower(): v for k, v in api_server["requests"][0]["headers"].items()}
     assert head["x-api-key"] == "sk-ant-abc"
+
+
+def test_url_is_read_at_call_time_not_import_time(monkeypatch):
+    """`url=API_URL` 을 기본값으로 두면 정의할 때 값이 박힌다.
+
+    그러면 시험용 서버를 가리키게 바꿔도 요청이 **진짜 API 로 나간다.**
+    실제로 로컬 시험 중에 그렇게 나갔다. 돈이 나가는 호출이라 이건 위험하다.
+    """
+    seen = {}
+
+    class FakeResponse:
+        def read(self): return b'{"content":[],"usage":{}}'
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake_open(request, timeout=0):
+        seen["url"] = request.full_url
+        return FakeResponse()
+
+    monkeypatch.setattr("gameedit.brain.API_URL", "http://127.0.0.1:9/fake")
+    monkeypatch.setattr("urllib.request.urlopen", fake_open)
+    call_api("sk-ant-x", {"model": "m"})
+    assert seen["url"] == "http://127.0.0.1:9/fake"

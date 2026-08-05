@@ -28,6 +28,7 @@ from .analyze import analyze_video
 from .config import Config
 from .media import extract_thumbnail, format_timecode
 from .models import EditPlan, analysis_from_dict, load_json, plan_from_dict, save_json
+from .cost import Ledger
 from .plan import build_plan
 from .render import render, resolve_output_size
 from .subtitles import content_box_height, with_title_card, write_ass
@@ -162,6 +163,29 @@ def resolve_target(value, default: float = 0.0) -> float:
         return default
     if not (MIN_TARGET <= number <= MAX_TARGET):
         return default
+    return number
+
+
+# AI 지출 상한으로 받아들일 범위(원). 0 은 "제한 없음" 이라 일부러 막는다 —
+# 화면에서 실수로 0 이 넘어오면 상한 없이 돈이 나간다.
+MIN_LIMIT = 10.0
+MAX_LIMIT = 100_000.0
+
+
+def resolve_limit(value) -> float | None:
+    """화면에서 온 AI 지출 상한. 못 쓸 값이면 None (설정값을 그대로 둔다).
+
+    `resolve_target` 과 같은 이유로 있다. 다만 이쪽은 잘못되면 **돈이 나간다.**
+    그래서 0 이나 음수, 글자, nan 은 전부 무시하고 설정값을 쓴다.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    if not (MIN_LIMIT <= number <= MAX_LIMIT):
+        return None
     return number
 
 
@@ -337,6 +361,12 @@ class JobManager:
             # 자막이 있으면 그 단계를 통째로 건너뛴다.
             config.set("transcribe.external", subs)
             config.set("transcribe.backend", "external")
+        # AI 는 화면에서 켤 때만 켠다. 설정 파일에 켜 둔 걸 화면이 모르고
+        # 돌리면, 안 켠 줄 알았는데 돈이 나간다.
+        config.set("ai.enabled", bool(job.options.get("ai")))
+        limit = resolve_limit(job.options.get("ai_limit_krw"))
+        if limit is not None:
+            config.set("ai.limit_krw", limit)
         if job.options.get("shorts"):
             config.set("project.resolution", "1080x1920")
             # 세로로 만들면 위아래가 빈다. 실제 쇼츠들처럼 그 자리를 채운다.
@@ -410,7 +440,11 @@ class JobManager:
 
         job.step = "편집 계획 세우는 중"
         job.progress = 0.57
-        plan = build_plan(analysis, config)
+        ledger = Ledger(limit_krw=float(config.get("ai.limit_krw", 0.0) or 0.0))
+        if config.get("ai.enabled"):
+            job.step = "AI 가 영상을 읽는 중"
+        plan = build_plan(analysis, config, ledger=ledger,
+                          wishes=job.options.get("wishes") or "", log=log)
         save_json(plan, work_dir / "plan.json")
         save_json(analysis, analysis_path)
         self._make_thumbnails(job, plan, work_dir)
@@ -449,6 +483,9 @@ class JobManager:
     def _summary(self, plan: EditPlan) -> dict:
         return {
             "fallback": bool(plan.meta.get("fallback")),
+            # AI 를 썼는지·얼마 나갔는지. 화면에 그대로 띄운다.
+            "ai": plan.meta.get("ai") or {},
+            "cost": plan.meta.get("cost") or {},
             "clips": len(plan.clips),
             "memes": len(plan.memes),
             "subtitles": len(plan.subtitles),

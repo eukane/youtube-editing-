@@ -203,6 +203,29 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     # -- 라우팅 ------------------------------------------------------------
+    def _ai_info(self) -> dict:
+        """화면이 예상 금액을 내는 데 필요한 것만.
+
+        **키 자체는 절대 내보내지 않는다.** 있는지 없는지와, 가려진 형태만
+        보낸다. 이 응답은 같은 와이파이의 아무 기기나 볼 수 있다.
+        """
+        from .brain import load_key, mask_key
+        from .cost import estimate_edit, krw
+
+        ai_cfg = dict(self.manager.config.section("ai"))
+        model = str(ai_cfg.get("model") or "")
+        # 1시간짜리 기준 단가. 화면은 이걸 영상 길이에 비례시켜 쓴다.
+        hour = estimate_edit(3600.0, ai_cfg)
+        key = load_key(str(ai_cfg.get("api_key", "")))
+        return {
+            "enabled": bool(ai_cfg.get("enabled")),
+            "model": model,
+            "mode": str(ai_cfg.get("mode", "dialogue")),
+            "krw_per_hour": round(krw(model, hour.input_tokens, hour.output_tokens)),
+            "has_key": bool(key),
+            "key_hint": mask_key(key) if key else "",
+        }
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -229,6 +252,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/speedtest":
             self._send_json(self.manager.speed_status())
+            return
+        if path == "/api/info":
+            self._send_json({"ai": self._ai_info()})
             return
 
         m = re.match(r"^/api/jobs/([0-9a-f]+)$", path)
@@ -473,6 +499,9 @@ class Handler(BaseHTTPRequestHandler):
             "style": resolve_style(data.get("style")),
             "subs": self._checked_subs(data.get("subs")),
             "wishes": str(data.get("wishes") or "")[:500],
+            # AI 는 화면에서 켠 경우에만. 돈이 나가는 스위치라 기본은 꺼짐이다.
+            "ai": bool(data.get("ai")),
+            "ai_limit_krw": data.get("ai_limit_krw"),
             # 쇼츠 위아래 빈 자리에 넣을 글. 길이를 여기서 자른다.
             "shorts_title": str(data.get("shorts_title") or "").strip()[:40],
             "channel": str(data.get("channel") or "").strip()[:24],

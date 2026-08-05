@@ -230,7 +230,7 @@ def estimate_call(prompt: str, model: str) -> float:
 
 # ---------------------------------------------------------------- 호출
 
-def call_api(key: str, body: dict, *, url: str = API_URL) -> dict:
+def call_api(key: str, body: dict, *, url: str = "") -> dict:
     """Messages API 한 번 호출. 표준 라이브러리만 쓴다.
 
     429(요청 과다)와 5xx(서버 문제)는 잠깐 쉬었다 다시 시도한다. 그 외
@@ -240,6 +240,11 @@ def call_api(key: str, body: dict, *, url: str = API_URL) -> dict:
     # HTTP 헤더는 latin-1 만 담을 수 있다. 폰에서 키를 붙여넣다 보면 한글이나
     # 보이지 않는 글자가 섞이는데, 그대로 보내면 UnicodeEncodeError 라는
     # 알아볼 수 없는 오류로 죽는다. 여기서 잡아서 사람 말로 알려 준다.
+    # 기본값을 `url=API_URL` 로 두면 **함수를 정의할 때** 값이 박힌다. 나중에
+    # API_URL 을 바꿔도(시험용 서버로 돌릴 때) 진짜 서버로 나간다. 실제로
+    # 로컬 시험 중에 요청이 진짜 API 로 나갔다.
+    url = url or API_URL
+
     key = (key or "").strip()
     if not key.isascii():
         raise ApiError("키에 한글이나 특수문자가 섞여 있습니다. "
